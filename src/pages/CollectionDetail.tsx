@@ -1,31 +1,23 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, ImagePlus, Play, Plus, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, ImagePlus, Play, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useTracks } from "../context/TrackContext";
 import { useCollections } from "../context/CollectionContext";
 import { usePlayer } from "../context/PlayerContext";
 import ClayCover from "../components/ClayCover";
 import TrackCard from "../components/TrackCard";
-import { readAudioDurationMs } from "../lib/audio";
 import { coverPublicUrl } from "../lib/db";
-import ClaySpinner, {
-  ButtonDots,
-  CollectionSkeleton,
-  LoadingOverlay,
-} from "../components/ClaySpinner";
+import ClaySpinner, { CollectionSkeleton } from "../components/ClaySpinner";
 
 export default function CollectionDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { tracks, ownerName, publish } = useTracks();
-  const { collections, loading, addTrack, removeTrack, remove, setCover } = useCollections();
+  const { tracks, ownerName } = useTracks();
+  const { collections, loading, removeTrack, remove, setCover } = useCollections();
   const { play, setQueue } = usePlayer();
-  const [picking, setPicking] = useState(true);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [addingId, setAddingId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [coverBusy, setCoverBusy] = useState(false);
 
@@ -57,7 +49,6 @@ export default function CollectionDetail() {
 
   const isOwner = user?.id === collection.ownerId;
   const isAlbum = collection.kind === "album";
-  const unused = tracks.filter((t) => !collection.trackIds.includes(t.id));
 
   function playAll() {
     if (members.length === 0) return;
@@ -86,52 +77,6 @@ export default function CollectionDetail() {
       navigate("/collections");
     } finally {
       setDeleting(false);
-    }
-  }
-
-  async function handleAddExisting(trackId: string) {
-    if (!collection) return;
-    setError("");
-    setAddingId(trackId);
-    try {
-      await addTrack(collection.id, trackId);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Could not add that song. Run supabase/migrate-collections.sql in SQL Editor."
-      );
-    } finally {
-      setAddingId(null);
-    }
-  }
-
-  async function handleUploadFromDrive(file: File) {
-    if (!user || !collection) return;
-    setBusy(true);
-    setError("");
-    try {
-      const durationMs = await readAudioDurationMs(file);
-      const title = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ");
-      const track = await publish(
-        {
-          title,
-          note: "",
-          mood: "",
-          coverSeed: Math.floor(Math.random() * 10000),
-          durationMs,
-          singerId: user.id,
-          likedByListener: false,
-          source: "upload",
-        },
-        file,
-        file.name
-      );
-      await addTrack(collection.id, track.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not upload that file.");
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -212,14 +157,14 @@ export default function CollectionDetail() {
             </button>
             {isOwner && (
               <>
-                <button
-                  onClick={() => setPicking((v) => !v)}
+                <Link
+                  to={`/upload?to=${collection.id}`}
                   className="clay-btn min-h-11 px-5 text-sm font-bold flex items-center gap-2"
                   style={{ background: "var(--clay-peach)", color: "var(--ink)" }}
                 >
                   <Plus size={16} />
                   Add songs
-                </button>
+                </Link>
                 <button
                   onClick={() => void handleDelete()}
                   disabled={deleting}
@@ -236,71 +181,25 @@ export default function CollectionDetail() {
         </div>
       </div>
 
-      {picking && isOwner && (
-        <div className="clay p-4 mb-6 flex flex-col gap-3" style={{ background: "white" }}>
-          <p className="text-sm font-bold" style={{ color: "var(--ink)" }}>
-            Add from your phone, computer, or Drive
-          </p>
-          <label
-            className="clay-btn min-h-12 px-4 py-3 text-sm font-bold flex items-center justify-center gap-2 cursor-pointer"
-            style={{ background: "var(--clay-mint)", color: "var(--ink)" }}
-            aria-busy={busy}
-          >
-            {busy ? <ButtonDots ink /> : <Upload size={16} />}
-            {busy ? "Uploading" : "Choose file from Drive or device"}
-            <input
-              type="file"
-              className="sr-only"
-              disabled={busy}
-              accept="audio/*,video/mp4,.mp3,.wav,.m4a,.aac,.ogg,.flac,.mp4,.webm"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                e.target.value = "";
-                if (file) void handleUploadFromDrive(file);
-              }}
-            />
-          </label>
-          <p className="text-xs" style={{ color: "var(--soft-ink)" }}>
-            Or tap a song already in SpotiYen
-          </p>
-          {error && (
-            <p className="text-xs font-semibold" style={{ color: "var(--record-red)" }}>
-              {error}
-            </p>
-          )}
-          {unused.length === 0 ? (
-            <p className="text-sm" style={{ color: "var(--soft-ink)" }}>
-              No other library songs yet. Use the button above to pick a file.
-            </p>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {unused.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => void handleAddExisting(t.id)}
-                  disabled={addingId === t.id}
-                  aria-busy={addingId === t.id}
-                  className="clay-sm text-left px-4 py-3 text-sm font-bold flex items-center justify-between gap-3"
-                  style={{ background: "var(--cream)", color: "var(--ink)" }}
-                >
-                  <span className="min-w-0">
-                    {t.title}
-                    <span className="block text-xs font-semibold" style={{ color: "var(--soft-ink)" }}>
-                      {ownerName(t.singerId)}
-                    </span>
-                  </span>
-                  {addingId === t.id && <ClaySpinner size={20} />}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+      {error && (
+        <p className="text-xs font-semibold mb-4" style={{ color: "var(--record-red)" }}>
+          {error}
+        </p>
       )}
 
       <div className="flex flex-col gap-3">
         {members.length === 0 ? (
           <p className="text-sm" style={{ color: "var(--soft-ink)" }}>
-            Empty for now.{isOwner ? " Add songs above." : ""}
+            Empty for now.
+            {isOwner ? (
+              <>
+                {" "}
+                <Link to={`/upload?to=${collection.id}`} className="font-bold" style={{ color: "var(--clay-rose)" }}>
+                  Upload a song
+                </Link>{" "}
+                to add it here.
+              </>
+            ) : null}
           </p>
         ) : (
           members.map((t, i) => (
@@ -318,7 +217,6 @@ export default function CollectionDetail() {
           ))
         )}
       </div>
-      {busy && <LoadingOverlay message="Adding this song to the mix" />}
     </div>
   );
 }
