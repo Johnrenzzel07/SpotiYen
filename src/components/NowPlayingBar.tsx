@@ -5,14 +5,18 @@ import {
   SkipForward,
   Heart,
   Volume2,
+  VolumeX,
+  Shuffle,
+  Repeat,
+  Repeat1,
 } from "lucide-react";
 import ClayCover from "./ClayCover";
 import ClaySpinner from "./ClaySpinner";
 import { formatTimeFromSec, finiteDuration } from "../lib/audio";
 import { coverPublicUrl } from "../lib/db";
-import { usePlayer } from "../context/PlayerContext";
+import { usePlayer, type RepeatMode } from "../context/PlayerContext";
 import { useTracks } from "../context/TrackContext";
-import { useRef } from "react";
+import { useRef, useState, type ReactNode } from "react";
 
 export default function NowPlayingBar() {
   const {
@@ -22,11 +26,155 @@ export default function NowPlayingBar() {
     currentTime,
     duration,
     volume,
+    shuffle,
+    repeat,
     togglePlay,
     seek,
     setVolume,
     next,
     prev,
+    toggleShuffle,
+    cycleRepeat,
+  } = usePlayer();
+  const { toggleLike, tracks, ownerName } = useTracks();
+  const [lastVolume, setLastVolume] = useState(0.8);
+
+  if (!currentTrack) return null;
+
+  const safeDuration = finiteDuration(duration, currentTrack.durationMs);
+  const progress = safeDuration > 0 ? Math.min(1, currentTime / safeDuration) : 0;
+  const liked =
+    tracks.find((t) => t.id === currentTrack.id)?.likedByListener ?? false;
+
+  function toggleMute() {
+    if (volume > 0) {
+      setLastVolume(volume);
+      setVolume(0);
+    } else {
+      setVolume(lastVolume || 0.8);
+    }
+  }
+
+  const cover = (
+    <ClayCover
+      title={currentTrack.title}
+      mood={currentTrack.mood}
+      seed={currentTrack.coverSeed}
+      size="sm"
+      imageUrl={coverPublicUrl(currentTrack.coverUrl)}
+      className="!rounded-xl"
+    />
+  );
+
+  const meta = (
+    <div className="min-w-0">
+      <p className="text-sm font-extrabold truncate leading-tight" style={{ color: "var(--ink)" }}>
+        {currentTrack.title}
+      </p>
+      <p className="text-[11px] font-semibold truncate mt-0.5" style={{ color: "var(--soft-ink)" }}>
+        {ownerName(currentTrack.singerId)}
+      </p>
+    </div>
+  );
+
+  const likeBtn = (
+    <IconButton
+      label={liked ? "Unlike" : "Like"}
+      onClick={() => toggleLike(currentTrack.id)}
+    >
+      <Heart
+        size={16}
+        fill={liked ? "var(--clay-rose)" : "none"}
+        style={{ color: liked ? "var(--clay-rose)" : "var(--soft-ink)" }}
+      />
+    </IconButton>
+  );
+
+  const playBtn = (
+    <button
+      onClick={togglePlay}
+      aria-busy={isBuffering}
+      className="clay-btn w-12 h-12 flex items-center justify-center flex-shrink-0"
+      style={{ background: "var(--clay-rose)" }}
+      aria-label={isBuffering ? "Loading" : isPlaying ? "Pause" : "Play"}
+    >
+      {isBuffering ? (
+        <ClaySpinner size={18} tone="light" />
+      ) : isPlaying ? (
+        <Pause size={18} fill="white" className="text-white" />
+      ) : (
+        <Play size={18} fill="white" className="text-white ml-0.5" />
+      )}
+    </button>
+  );
+
+  return (
+    <>
+      <div
+        className="hidden md:grid fixed bottom-4 left-4 right-4 z-40 clay-float px-5 py-3.5 gap-x-6 gap-y-0 items-center"
+        style={{
+          background: "white",
+          gridTemplateColumns: "minmax(0,1fr) minmax(280px,1.6fr) minmax(0,1fr)",
+        }}
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          {cover}
+          {meta}
+          {likeBtn}
+        </div>
+
+        <div className="flex flex-col items-center gap-1.5 min-w-0">
+          <div className="flex items-center gap-1">
+            <ShuffleButton on={shuffle} onClick={toggleShuffle} />
+            <IconButton label="Previous" onClick={prev}>
+              <SkipBack size={18} fill="var(--ink)" style={{ color: "var(--ink)" }} />
+            </IconButton>
+            {playBtn}
+            <IconButton label="Next" onClick={next}>
+              <SkipForward size={18} fill="var(--ink)" style={{ color: "var(--ink)" }} />
+            </IconButton>
+            <RepeatButton mode={repeat} onClick={cycleRepeat} />
+          </div>
+          <SeekBar
+            currentTime={currentTime}
+            duration={safeDuration}
+            progress={progress}
+            onSeek={seek}
+          />
+        </div>
+
+        <div className="flex items-center justify-end gap-2 min-w-0">
+          <IconButton label={volume === 0 ? "Unmute" : "Mute"} onClick={toggleMute}>
+            {volume === 0 ? (
+              <VolumeX size={16} style={{ color: "var(--soft-ink)" }} />
+            ) : (
+              <Volume2 size={16} style={{ color: "var(--soft-ink)" }} />
+            )}
+          </IconButton>
+          <div className="w-28">
+            <VolumeBar value={volume} onChange={setVolume} />
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+export function MobileNowPlaying() {
+  const {
+    currentTrack,
+    isPlaying,
+    isBuffering,
+    currentTime,
+    duration,
+    shuffle,
+    repeat,
+    togglePlay,
+    seek,
+    next,
+    prev,
+    toggleShuffle,
+    cycleRepeat,
   } = usePlayer();
   const { toggleLike, tracks, ownerName } = useTracks();
 
@@ -38,182 +186,204 @@ export default function NowPlayingBar() {
     tracks.find((t) => t.id === currentTrack.id)?.likedByListener ?? false;
 
   return (
-    <>
-      {/* Desktop bar */}
-      <div
-        className="hidden md:flex fixed bottom-4 left-4 right-4 z-40 clay-float items-center gap-4 px-5 py-3"
-        style={{ background: "white" }}
-      >
-        <div className="flex items-center gap-3 min-w-0 w-64">
-          <ClayCover
-            title={currentTrack.title}
-            mood={currentTrack.mood}
-            seed={currentTrack.coverSeed}
-            size="sm"
-            imageUrl={coverPublicUrl(currentTrack.coverUrl)}
-          />
-          <div className="min-w-0">
-            <p
-              className="text-sm font-bold truncate"
-              style={{ color: "var(--ink)" }}
-            >
-              {currentTrack.title}
-            </p>
-            <p className="text-xs" style={{ color: "var(--soft-ink)" }}>
-              {ownerName(currentTrack.singerId)}
-            </p>
-          </div>
-          <button
-            onClick={() => toggleLike(currentTrack.id)}
-            className="p-2 rounded-full min-w-11 min-h-11 flex items-center justify-center"
-            aria-label={liked ? "Unlike" : "Like"}
-          >
-            <Heart
-              size={16}
-              fill={liked ? "var(--clay-rose)" : "none"}
-              className={
-                liked ? "text-[var(--clay-rose)]" : "text-[var(--soft-ink)]"
-              }
-            />
-          </button>
-        </div>
-
-        <div className="flex-1 flex flex-col items-center gap-1.5">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={prev}
-              className="p-2 rounded-full min-w-11 min-h-11 flex items-center justify-center"
-              aria-label="Previous"
-            >
-              <SkipBack size={18} style={{ color: "var(--ink)" }} />
-            </button>
-            <button
-              onClick={togglePlay}
-              aria-busy={isBuffering}
-              className="clay-btn w-11 h-11 flex items-center justify-center"
-              style={{ background: "var(--clay-rose)" }}
-              aria-label={isBuffering ? "Loading" : isPlaying ? "Pause" : "Play"}
-            >
-              {isBuffering ? (
-                <ClaySpinner size={18} tone="light" />
-              ) : isPlaying ? (
-                <Pause size={18} fill="white" className="text-white" />
-              ) : (
-                <Play size={18} fill="white" className="text-white ml-0.5" />
-              )}
-            </button>
-            <button
-              onClick={next}
-              className="p-2 rounded-full min-w-11 min-h-11 flex items-center justify-center"
-              aria-label="Next"
-            >
-              <SkipForward size={18} style={{ color: "var(--ink)" }} />
-            </button>
-          </div>
-          <SeekBar
-            currentTime={currentTime}
-            duration={safeDuration}
-            progress={progress}
-            onSeek={seek}
-          />
-        </div>
-
-        <div className="flex items-center gap-2 w-36">
-          <Volume2 size={16} style={{ color: "var(--soft-ink)" }} />
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={volume}
-            onChange={(e) => setVolume(parseFloat(e.target.value))}
-            className="flex-1 accent-[var(--clay-rose)]"
-            aria-label="Volume"
-          />
-        </div>
+    <div>
+      <div className="px-4 pt-3">
+        <SeekBar
+          currentTime={currentTime}
+          duration={safeDuration}
+          progress={progress}
+          onSeek={seek}
+          compact
+        />
       </div>
 
-      {/* Mobile player */}
-      <div
-        className="md:hidden fixed left-3 right-3 z-40 clay-sm px-3 pt-2.5 pb-2"
-        style={{
-          background: "white",
-          bottom: "calc(4.5rem + env(safe-area-inset-bottom))",
-        }}
-      >
-        <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3 px-4 pt-1">
+        <div className="relative flex-shrink-0">
           <ClayCover
             title={currentTrack.title}
             mood={currentTrack.mood}
             seed={currentTrack.coverSeed}
             size="sm"
             imageUrl={coverPublicUrl(currentTrack.coverUrl)}
+            className="!w-11 !h-11 !rounded-xl"
           />
-          <div className="min-w-0 flex-1">
-            <p
-              className="text-sm font-bold truncate"
-              style={{ color: "var(--ink)" }}
-            >
-              {currentTrack.title}
-            </p>
-            <p className="text-[11px]" style={{ color: "var(--soft-ink)" }}>
-              {ownerName(currentTrack.singerId)}
-            </p>
-          </div>
-          <button
-            onClick={() => toggleLike(currentTrack.id)}
-            className="w-11 h-11 flex items-center justify-center flex-shrink-0"
-            aria-label={liked ? "Unlike" : "Like"}
-          >
-            <Heart
-              size={18}
-              fill={liked ? "var(--clay-rose)" : "none"}
-              className={
-                liked ? "text-[var(--clay-rose)]" : "text-[var(--soft-ink)]"
-              }
+          {isPlaying && !isBuffering && (
+            <span
+              className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full"
+              style={{ background: "var(--clay-mint)", boxShadow: "0 0 0 2px white" }}
+              aria-hidden
             />
-          </button>
-          <button
-            onClick={prev}
-            className="w-11 h-11 flex items-center justify-center flex-shrink-0"
-            aria-label="Previous"
-          >
-            <SkipBack size={18} style={{ color: "var(--ink)" }} />
-          </button>
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-extrabold truncate leading-tight" style={{ color: "var(--ink)" }}>
+            {currentTrack.title}
+          </p>
+          <p className="text-[11px] font-semibold truncate" style={{ color: "var(--soft-ink)" }}>
+            {ownerName(currentTrack.singerId)}
+          </p>
+        </div>
+        <IconButton
+          label={liked ? "Unlike" : "Like"}
+          onClick={() => toggleLike(currentTrack.id)}
+        >
+          <Heart
+            size={16}
+            fill={liked ? "var(--clay-rose)" : "none"}
+            style={{ color: liked ? "var(--clay-rose)" : "var(--soft-ink)" }}
+          />
+        </IconButton>
+      </div>
+
+      <div className="flex items-center px-2 pb-2 pt-0.5">
+        <ShuffleButton on={shuffle} onClick={toggleShuffle} />
+        <div className="flex-1 flex items-center justify-center">
+          <IconButton label="Previous" onClick={prev}>
+            <SkipBack size={18} fill="var(--ink)" style={{ color: "var(--ink)" }} />
+          </IconButton>
           <button
             onClick={togglePlay}
             aria-busy={isBuffering}
-            className="clay-btn w-11 h-11 flex items-center justify-center flex-shrink-0"
+            className="clay-btn w-11 h-11 flex items-center justify-center flex-shrink-0 mx-1"
             style={{ background: "var(--clay-rose)" }}
             aria-label={isBuffering ? "Loading" : isPlaying ? "Pause" : "Play"}
           >
             {isBuffering ? (
-              <ClaySpinner size={18} tone="light" />
+              <ClaySpinner size={16} tone="light" />
             ) : isPlaying ? (
-              <Pause size={18} fill="white" className="text-white" />
+              <Pause size={16} fill="white" className="text-white" />
             ) : (
-              <Play size={18} fill="white" className="text-white ml-0.5" />
+              <Play size={16} fill="white" className="text-white ml-0.5" />
             )}
           </button>
-          <button
-            onClick={next}
-            className="w-11 h-11 flex items-center justify-center flex-shrink-0"
-            aria-label="Next"
-          >
-            <SkipForward size={18} style={{ color: "var(--ink)" }} />
-          </button>
+          <IconButton label="Next" onClick={next}>
+            <SkipForward size={18} fill="var(--ink)" style={{ color: "var(--ink)" }} />
+          </IconButton>
         </div>
-        <div className="mt-1.5 px-0.5">
-          <SeekBar
-            currentTime={currentTime}
-            duration={safeDuration}
-            progress={progress}
-            onSeek={seek}
-            compact
-          />
-        </div>
+        <RepeatButton mode={repeat} onClick={cycleRepeat} />
       </div>
-    </>
+    </div>
+  );
+}
+
+function ShuffleButton({ on, onClick }: { on: boolean; onClick: () => void }) {
+  return (
+    <IconButton
+      label={on ? "Shuffle on" : "Shuffle off"}
+      onClick={onClick}
+      pressed={on}
+      tone="lilac"
+    >
+      <Shuffle size={16} style={{ color: on ? "var(--ink)" : "var(--soft-ink)" }} />
+    </IconButton>
+  );
+}
+
+function RepeatButton({ mode, onClick }: { mode: RepeatMode; onClick: () => void }) {
+  const on = mode !== "off";
+  const label =
+    mode === "one" ? "Repeat this song" : mode === "all" ? "Repeat all" : "Repeat off";
+  return (
+    <IconButton label={label} onClick={onClick} pressed={on} tone="peach">
+      {mode === "one" ? (
+        <Repeat1 size={16} style={{ color: "var(--ink)" }} />
+      ) : (
+        <Repeat size={16} style={{ color: on ? "var(--ink)" : "var(--soft-ink)" }} />
+      )}
+    </IconButton>
+  );
+}
+
+function IconButton({
+  label,
+  onClick,
+  children,
+  pressed = false,
+  tone = "cream",
+}: {
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+  pressed?: boolean;
+  tone?: "cream" | "lilac" | "peach";
+}) {
+  const fill =
+    !pressed
+      ? "transparent"
+      : tone === "lilac"
+        ? "var(--clay-lilac)"
+        : tone === "peach"
+          ? "var(--clay-peach)"
+          : "var(--cream)";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      aria-pressed={pressed}
+      className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0"
+      style={{
+        background: fill,
+        boxShadow: pressed
+          ? "inset 3px 3px 8px rgba(58,47,69,0.12), inset -2px -2px 4px rgba(255,255,255,0.5)"
+          : "none",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function VolumeBar({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+
+  function setFromX(clientX: number) {
+    if (!ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    onChange(pct);
+  }
+
+  return (
+    <div
+      ref={ref}
+      className="h-5 flex items-center cursor-pointer touch-none"
+      onPointerDown={(e) => {
+        dragging.current = true;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        setFromX(e.clientX);
+      }}
+      onPointerMove={(e) => {
+        if (dragging.current) setFromX(e.clientX);
+      }}
+      onPointerUp={() => {
+        dragging.current = false;
+      }}
+      onPointerCancel={() => {
+        dragging.current = false;
+      }}
+      role="slider"
+      aria-label="Volume"
+      aria-valuemin={0}
+      aria-valuemax={1}
+      aria-valuenow={value}
+    >
+      <div className="relative w-full h-1.5 rounded-full" style={{ background: "rgba(197,180,240,0.4)" }}>
+        <div
+          className="absolute top-0 left-0 h-full rounded-full"
+          style={{ width: `${value * 100}%`, background: "var(--clay-lilac)" }}
+        />
+        <div
+          className="absolute top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full"
+          style={{
+            left: `calc(${value * 100}% - 7px)`,
+            background: "white",
+            boxShadow: "3px 3px 8px rgba(58,47,69,0.16)",
+          }}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -241,9 +411,9 @@ function SeekBar({
   }
 
   return (
-    <div className={`flex items-center gap-2 ${compact ? "w-full" : "w-full max-w-lg"}`}>
+    <div className={`flex items-center gap-2 ${compact ? "w-full" : "w-full"}`}>
       <span
-        className="text-[10px] font-semibold w-8 text-right tabular-nums"
+        className="text-[10px] font-bold w-8 text-right tabular-nums"
         style={{ color: "var(--soft-ink)" }}
       >
         {formatTimeFromSec(currentTime)}
@@ -272,8 +442,8 @@ function SeekBar({
         aria-valuenow={currentTime}
       >
         <div
-          className="relative w-full h-2 rounded-full"
-          style={{ background: "rgba(197,180,240,0.45)" }}
+          className="relative w-full rounded-full"
+          style={{ height: compact ? 5 : 6, background: "rgba(197,180,240,0.4)" }}
         >
           <div
             className="absolute top-0 left-0 h-full rounded-full"
@@ -283,16 +453,19 @@ function SeekBar({
             }}
           />
           <div
-            className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full clay-sm"
+            className="absolute top-1/2 -translate-y-1/2 rounded-full"
             style={{
-              left: `calc(${progress * 100}% - 8px)`,
+              width: compact ? 12 : 14,
+              height: compact ? 12 : 14,
+              left: `calc(${progress * 100}% - ${compact ? 6 : 7}px)`,
               background: "white",
+              boxShadow: "3px 3px 8px rgba(58,47,69,0.16)",
             }}
           />
         </div>
       </div>
       <span
-        className="text-[10px] font-semibold w-8 tabular-nums"
+        className="text-[10px] font-bold w-8 tabular-nums"
         style={{ color: "var(--soft-ink)" }}
       >
         {duration > 0 ? `-${formatTimeFromSec(duration - currentTime)}` : "0:00"}

@@ -1,7 +1,7 @@
 import { Outlet, useLocation } from "react-router-dom";
 import { useEffect } from "react";
 import Sidebar from "./Sidebar";
-import BottomNav from "./BottomNav";
+import MobileDock from "./MobileDock";
 import NowPlayingBar from "./NowPlayingBar";
 import MobileHeader from "./MobileHeader";
 import Toast from "./Toast";
@@ -29,8 +29,8 @@ export default function Layout() {
         <main
           className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden md:pb-28 ${
             hasPlayer
-              ? "pb-[calc(11.75rem+env(safe-area-inset-bottom))]"
-              : "pb-[calc(5.75rem+env(safe-area-inset-bottom))]"
+              ? "pb-[calc(12.5rem+env(safe-area-inset-bottom))]"
+              : "pb-[calc(5.25rem+env(safe-area-inset-bottom))]"
           }`}
         >
           <div key={location.pathname} className="animate-slide-up">
@@ -40,7 +40,7 @@ export default function Layout() {
       </div>
 
       <NowPlayingBar />
-      <BottomNav />
+      <MobileDock />
 
       {newTrackToast && (
         <Toast
