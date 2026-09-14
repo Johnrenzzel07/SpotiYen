@@ -29,6 +29,7 @@ type TrackRow = {
   liked_by_listener: boolean;
   is_sample: boolean;
   source?: TrackSource;
+  cover_url?: string | null;
 };
 
 type CollectionRow = {
@@ -78,6 +79,7 @@ function mapTrack(row: TrackRow): Track {
     likedByListener: row.liked_by_listener,
     isSample: row.is_sample,
     source: row.source === "upload" ? "upload" : "recording",
+    coverUrl: row.cover_url ?? "",
   };
 }
 
@@ -216,9 +218,16 @@ function adminBlocked(error: { message: string } | null) {
   }
 }
 
-export async function deleteTrack(id: string, audioUrl?: string): Promise<void> {
+export async function deleteTrack(
+  id: string,
+  audioUrl?: string,
+  coverUrl?: string
+): Promise<void> {
   if (audioUrl && !audioUrl.startsWith("http")) {
     await supabase.storage.from(RECORDINGS_BUCKET).remove([audioUrl]);
+  }
+  if (coverUrl && !coverUrl.startsWith("http")) {
+    await supabase.storage.from(COVERS_BUCKET).remove([coverUrl]);
   }
   const { error } = await supabase.from("tracks").delete().eq("id", id);
   adminBlocked(error);
@@ -283,6 +292,7 @@ export async function insertTrack(track: {
   durationMs: number;
   singerId: string;
   source?: TrackSource;
+  coverUrl?: string;
 }): Promise<Track> {
   const row = {
     id: track.id,
@@ -296,13 +306,29 @@ export async function insertTrack(track: {
     liked_by_listener: false,
     is_sample: false,
     source: track.source || "recording",
+    cover_url: track.coverUrl || "",
   };
 
   let { data, error } = await supabase.from("tracks").insert(row).select().single();
-  if (error && /source/i.test(error.message)) {
+  if (error && /source/i.test(error.message) && !/cover_url/i.test(error.message)) {
     const { source: _source, ...withoutSource } = row;
     void _source;
     ({ data, error } = await supabase.from("tracks").insert(withoutSource).select().single());
+  }
+  if (error && /cover_url|schema cache|could not find the.*column/i.test(error.message)) {
+    if (track.coverUrl) {
+      throw new Error(
+        "Song cover photos need one SQL step. In Supabase open SQL Editor, paste supabase/migrate-track-covers.sql, click Run, then try again."
+      );
+    }
+    const { cover_url: _cover, ...withoutCover } = row;
+    void _cover;
+    ({ data, error } = await supabase.from("tracks").insert(withoutCover).select().single());
+    if (error && /source/i.test(error.message)) {
+      const { source: _source, ...withoutSource } = withoutCover;
+      void _source;
+      ({ data, error } = await supabase.from("tracks").insert(withoutSource).select().single());
+    }
   }
   throwIfError(error);
   return mapTrack(data as TrackRow);
@@ -394,16 +420,20 @@ export function coverPublicUrl(path: string): string {
   return supabase.storage.from(COVERS_BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
-function coverSqlHint(error: { message: string } | null) {
+function coverSqlHint(error: { message: string } | null, forTracks = false) {
   if (!error) return;
   if (/cover_url|schema cache|could not find the.*column/i.test(error.message)) {
     throw new Error(
-      "Cover photos need one SQL step. In Supabase open SQL Editor, paste supabase/migrate-covers.sql, click Run, then try again."
+      forTracks
+        ? "Song cover photos need one SQL step. In Supabase open SQL Editor, paste supabase/migrate-track-covers.sql, click Run, then try again."
+        : "Cover photos need one SQL step. In Supabase open SQL Editor, paste supabase/migrate-covers.sql, click Run, then try again."
     );
   }
   if (/bucket|covers/i.test(error.message) && /not found|exist/i.test(error.message)) {
     throw new Error(
-      "Cover storage is missing. Run supabase/migrate-covers.sql in the SQL Editor, then try again."
+      forTracks
+        ? "Cover storage is missing. Run supabase/migrate-track-covers.sql in the SQL Editor, then try again."
+        : "Cover storage is missing. Run supabase/migrate-covers.sql in the SQL Editor, then try again."
     );
   }
 }
@@ -459,17 +489,13 @@ export async function createCollection(params: {
   return mapCollection(data as CollectionRow, []);
 }
 
-export async function uploadCollectionCover(
-  ownerId: string,
-  collectionId: string,
-  blob: Blob
-): Promise<string> {
-  const path = `${ownerId}/${collectionId}-${Date.now()}.jpg`;
+async function uploadCoverBlob(ownerId: string, key: string, blob: Blob, forTracks = false) {
+  const path = `${ownerId}/${key}-${Date.now()}.jpg`;
   const { error } = await supabase.storage.from(COVERS_BUCKET).upload(path, blob, {
     contentType: "image/jpeg",
     upsert: true,
   });
-  coverSqlHint(error);
+  coverSqlHint(error, forTracks);
   if (error) {
     throw new Error(
       error.message.includes("size") || error.message.includes("maximum")
@@ -478,6 +504,22 @@ export async function uploadCollectionCover(
     );
   }
   return path;
+}
+
+export async function uploadCollectionCover(
+  ownerId: string,
+  collectionId: string,
+  blob: Blob
+): Promise<string> {
+  return uploadCoverBlob(ownerId, collectionId, blob);
+}
+
+export async function uploadTrackCover(
+  ownerId: string,
+  trackId: string,
+  blob: Blob
+): Promise<string> {
+  return uploadCoverBlob(ownerId, `tracks/${trackId}`, blob, true);
 }
 
 export async function setCollectionCoverUrl(

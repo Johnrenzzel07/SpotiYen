@@ -10,6 +10,7 @@ import ClayCover from "../components/ClayCover";
 import CollectionCard from "../components/CollectionCard";
 import ClaySpinner, { LibrarySkeleton } from "../components/ClaySpinner";
 import ConfirmDialog from "../components/ConfirmDialog";
+import { coverPublicUrl } from "../lib/db";
 import type { Track } from "../types";
 
 type Tab = "home" | "songs" | "liked" | "recent";
@@ -337,6 +338,7 @@ function RecentCard({
           seed={track.coverSeed}
           size="lg"
           className="!w-20 !h-20 !rounded-xl"
+          imageUrl={coverPublicUrl(track.coverUrl)}
         />
         {waiting && (
           <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/25">

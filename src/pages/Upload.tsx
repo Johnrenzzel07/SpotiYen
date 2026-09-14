@@ -1,10 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Upload as UploadIcon, CheckCircle2, AlertCircle, Mic } from "lucide-react";
+import { Upload as UploadIcon, CheckCircle2, AlertCircle, Mic, ImagePlus, X } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useTracks } from "../context/TrackContext";
 import { useCollections } from "../context/CollectionContext";
-import ClayCover from "../components/ClayCover";
 import { formatTime, readAudioDurationMs } from "../lib/audio";
 import type { Mood } from "../types";
 import ClaySpinner, { ButtonDots, ClayProgress, LoadingOverlay } from "../components/ClaySpinner";
@@ -29,6 +28,20 @@ export default function Upload() {
   const [coverSeed] = useState(() => Math.floor(Math.random() * 10000));
   const [uploadPct, setUploadPct] = useState(0);
   const [readingFile, setReadingFile] = useState(false);
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState("");
+
+  useEffect(() => {
+    return () => {
+      if (photoPreview) URL.revokeObjectURL(photoPreview);
+    };
+  }, [photoPreview]);
+
+  function onPhoto(next: File | null) {
+    if (photoPreview) URL.revokeObjectURL(photoPreview);
+    setPhoto(next);
+    setPhotoPreview(next ? URL.createObjectURL(next) : "");
+  }
 
   async function onFile(next: File | null) {
     setFile(next);
@@ -69,7 +82,8 @@ export default function Upload() {
           source: "upload",
         },
         file,
-        file.name
+        file.name,
+        photo
       );
       if (albumId) {
         try {
@@ -84,6 +98,9 @@ export default function Upload() {
       setMood("");
       setAlbumId("");
       setDurationMs(0);
+      if (photoPreview) URL.revokeObjectURL(photoPreview);
+      setPhoto(null);
+      setPhotoPreview("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed.");
     } finally {
@@ -155,14 +172,52 @@ export default function Upload() {
         </label>
 
         {file && (
+          <p className="text-xs font-semibold flex items-center gap-2" style={{ color: "var(--soft-ink)" }}>
+            {readingFile && <ClaySpinner size={16} />}
+            {durationMs ? formatTime(durationMs) : readingFile ? "Reading length" : "Length unknown"}
+          </p>
+        )}
+
+        <div>
+          <p className="text-xs font-bold mb-2" style={{ color: "var(--soft-ink)" }}>
+            Cover photo <span className="font-semibold">Optional</span>
+          </p>
           <div className="flex items-center gap-3">
-            <ClayCover title={title || "Song"} mood={mood} seed={coverSeed} size="md" />
-            <p className="text-xs font-semibold flex items-center gap-2" style={{ color: "var(--soft-ink)" }}>
-              {readingFile && <ClaySpinner size={16} />}
-              {durationMs ? formatTime(durationMs) : readingFile ? "Reading length" : "Length unknown"}
+            <div className="relative w-20 h-20 flex-shrink-0">
+              <label
+                className="w-20 h-20 clay-sm overflow-hidden cursor-pointer flex items-center justify-center"
+                style={{ background: "var(--cream)" }}
+                aria-label="Add a cover photo"
+              >
+                {photoPreview ? (
+                  <img src={photoPreview} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <ImagePlus size={22} style={{ color: "var(--clay-rose)" }} />
+                )}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={(e) => onPhoto(e.target.files?.[0] ?? null)}
+                />
+              </label>
+              {photo && (
+                <button
+                  type="button"
+                  onClick={() => onPhoto(null)}
+                  className="absolute -top-1 -right-1 clay-btn w-7 h-7 flex items-center justify-center z-10"
+                  style={{ background: "white", color: "var(--ink)" }}
+                  aria-label="Remove photo"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+            <p className="text-xs leading-relaxed" style={{ color: "var(--soft-ink)" }}>
+              Add a picture for this song. If you skip it, SpotiYen makes one.
             </p>
           </div>
-        )}
+        </div>
 
         <label className="text-xs font-bold" style={{ color: "var(--soft-ink)" }}>
           Title

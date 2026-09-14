@@ -20,10 +20,14 @@ create table if not exists public.tracks (
   created_at timestamptz not null default now(),
   singer_id uuid not null references public.profiles (id) on delete cascade,
   liked_by_listener boolean not null default false,
-  is_sample boolean not null default false
+  is_sample boolean not null default false,
+  cover_url text not null default ''
 );
 
 create index if not exists tracks_created_at_idx on public.tracks (created_at desc);
+
+alter table public.tracks
+  add column if not exists cover_url text not null default '';
 
 alter table public.profiles enable row level security;
 alter table public.tracks enable row level security;

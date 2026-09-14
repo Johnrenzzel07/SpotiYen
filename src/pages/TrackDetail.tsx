@@ -8,6 +8,7 @@ import ClayCover from "../components/ClayCover";
 import ClaySpinner, { LibrarySkeleton } from "../components/ClaySpinner";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { formatTime, timeAgo } from "../lib/audio";
+import { coverPublicUrl } from "../lib/db";
 
 export default function TrackDetail() {
   const { id } = useParams<{ id: string }>();
@@ -46,6 +47,7 @@ export default function TrackDetail() {
   const waiting = isActive && isBuffering;
 
   function handlePlay() {
+    if (!track) return;
     if (isActive) {
       togglePlay();
     } else {
@@ -73,6 +75,7 @@ export default function TrackDetail() {
           mood={track.mood}
           seed={track.coverSeed}
           size="xl"
+          imageUrl={coverPublicUrl(track.coverUrl)}
         />
 
         <div className="text-center">

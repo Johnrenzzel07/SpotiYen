@@ -57,7 +57,7 @@ export function getWaveformData(
   analyser: AnalyserNode,
   dataArray: Uint8Array
 ): number[] {
-  analyser.getByteTimeDomainData(dataArray);
+  analyser.getByteTimeDomainData(dataArray as Uint8Array<ArrayBuffer>);
   const bars = 40;
   const step = Math.floor(dataArray.length / bars);
   const result: number[] = [];

@@ -27,6 +27,7 @@ export interface Track {
   likedByListener: boolean;
   isSample?: boolean;
   source?: TrackSource;
+  coverUrl: string;
 }
 
 export interface Collection {

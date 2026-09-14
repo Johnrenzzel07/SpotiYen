@@ -18,7 +18,9 @@ import {
   insertTrack,
   deleteTrack as dbDeleteTrack,
   updateProfile as dbUpdateProfile,
+  uploadTrackCover,
 } from "../lib/db";
+import { prepareCoverBlob } from "../lib/image";
 import { useAuth } from "./AuthContext";
 
 interface TrackCtx {
@@ -28,9 +30,10 @@ interface TrackCtx {
   refresh: () => Promise<void>;
   ownerName: (userId: string) => string;
   publish: (
-    track: Omit<Track, "id" | "createdAt" | "audioUrl">,
+    track: Omit<Track, "id" | "createdAt" | "audioUrl" | "coverUrl">,
     audioBlob: Blob,
-    filename?: string
+    filename?: string,
+    coverFile?: File | null
   ) => Promise<Track>;
   toggleLike: (id: string) => Promise<void>;
   deleteTrack: (id: string) => Promise<void>;
@@ -103,12 +106,18 @@ export function TrackProvider({ children }: { children: ReactNode }) {
 
   const publish = useCallback(
     async (
-      data: Omit<Track, "id" | "createdAt" | "audioUrl">,
+      data: Omit<Track, "id" | "createdAt" | "audioUrl" | "coverUrl">,
       audioBlob: Blob,
-      filename?: string
+      filename?: string,
+      coverFile?: File | null
     ): Promise<Track> => {
       const id = crypto.randomUUID();
       const audioUrl = await uploadRecording(data.singerId, id, audioBlob, filename);
+      let coverUrl = "";
+      if (coverFile) {
+        const blob = await prepareCoverBlob(coverFile);
+        coverUrl = await uploadTrackCover(data.singerId, id, blob);
+      }
       const created = await insertTrack({
         id,
         title: data.title,
@@ -119,6 +128,7 @@ export function TrackProvider({ children }: { children: ReactNode }) {
         durationMs: data.durationMs,
         singerId: data.singerId,
         source: data.source || "recording",
+        coverUrl,
       });
       setTracks((prev) => [created, ...prev.filter((t) => t.id !== created.id)]);
       return created;
@@ -152,7 +162,7 @@ export function TrackProvider({ children }: { children: ReactNode }) {
       throw new Error("Only the admin account can delete songs.");
     }
     const track = tracks.find((t) => t.id === id);
-    await dbDeleteTrack(id, track?.audioUrl);
+    await dbDeleteTrack(id, track?.audioUrl, track?.coverUrl);
     setTracks((prev) => prev.filter((t) => t.id !== id));
   }, [tracks, user]);
 

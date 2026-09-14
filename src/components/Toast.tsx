@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Play, X } from "lucide-react";
 import ClayCover from "./ClayCover";
 import { useTracks } from "../context/TrackContext";
+import { coverPublicUrl } from "../lib/db";
 import type { Track } from "../types";
 
 interface Props {
@@ -38,6 +39,7 @@ export default function Toast({ track, onPlay, onDismiss }: Props) {
           mood={track.mood}
           seed={track.coverSeed}
           size="sm"
+          imageUrl={coverPublicUrl(track.coverUrl)}
         />
         <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold" style={{ color: "var(--soft-ink)" }}>

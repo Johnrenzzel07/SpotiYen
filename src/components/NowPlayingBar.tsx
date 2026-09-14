@@ -9,6 +9,7 @@ import {
 import ClayCover from "./ClayCover";
 import ClaySpinner from "./ClaySpinner";
 import { formatTimeFromSec, finiteDuration } from "../lib/audio";
+import { coverPublicUrl } from "../lib/db";
 import { usePlayer } from "../context/PlayerContext";
 import { useTracks } from "../context/TrackContext";
 import { useRef } from "react";
@@ -49,6 +50,7 @@ export default function NowPlayingBar() {
             mood={currentTrack.mood}
             seed={currentTrack.coverSeed}
             size="sm"
+            imageUrl={coverPublicUrl(currentTrack.coverUrl)}
           />
           <div className="min-w-0">
             <p
@@ -145,6 +147,7 @@ export default function NowPlayingBar() {
             mood={currentTrack.mood}
             seed={currentTrack.coverSeed}
             size="sm"
+            imageUrl={coverPublicUrl(currentTrack.coverUrl)}
           />
           <div className="min-w-0 flex-1">
             <p

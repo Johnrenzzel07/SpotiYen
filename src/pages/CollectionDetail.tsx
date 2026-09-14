@@ -66,6 +66,7 @@ export default function CollectionDetail() {
   }
 
   async function handleCoverPhoto(file: File) {
+    if (!collection) return;
     setCoverBusy(true);
     setError("");
     try {
@@ -78,6 +79,7 @@ export default function CollectionDetail() {
   }
 
   async function handleDelete() {
+    if (!collection) return;
     setDeleting(true);
     try {
       await remove(collection.id);
@@ -88,6 +90,7 @@ export default function CollectionDetail() {
   }
 
   async function handleAddExisting(trackId: string) {
+    if (!collection) return;
     setError("");
     setAddingId(trackId);
     try {
@@ -104,7 +107,7 @@ export default function CollectionDetail() {
   }
 
   async function handleUploadFromDrive(file: File) {
-    if (!user) return;
+    if (!user || !collection) return;
     setBusy(true);
     setError("");
     try {

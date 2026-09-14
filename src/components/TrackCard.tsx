@@ -2,6 +2,7 @@ import { Heart, Play, Pause, Trash2 } from "lucide-react";
 import ClayCover from "./ClayCover";
 import ClaySpinner from "./ClaySpinner";
 import { timeAgo, formatTime } from "../lib/audio";
+import { coverPublicUrl } from "../lib/db";
 import type { Track } from "../types";
 import { usePlayer } from "../context/PlayerContext";
 import { useTracks } from "../context/TrackContext";
@@ -49,6 +50,7 @@ export default function TrackCard({ track, index = 0, queue, onRemove, onDelete 
           mood={track.mood}
           seed={track.coverSeed}
           size="sm"
+          imageUrl={coverPublicUrl(track.coverUrl)}
         />
         {waiting ? (
           <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/25">
