@@ -9,8 +9,9 @@ type SyncInput = {
 
 function groqKey() {
   return (
-    process.env["groq-api-key"]?.trim() ||
+    process.env.groq_api_key?.trim() ||
     process.env.GROQ_API_KEY?.trim() ||
+    process.env["groq-api-key"]?.trim() ||
     process.env.GROQ_KEY?.trim() ||
     ""
   );
@@ -115,7 +116,7 @@ export async function handleLyricsSync(request: Request): Promise<Response> {
       const message = err instanceof Error ? err.message : "";
       if (/api key|unauthorized|invalid.*key/i.test(message)) {
         return json(502, {
-          error: "Groq rejected the API key. Check groq-api-key in .env.",
+          error: "Groq rejected the API key. Check groq_api_key in .env.",
         });
       }
     }
