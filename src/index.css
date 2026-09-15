@@ -269,12 +269,26 @@ a,
 }
 
 .karaoke-line {
-  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.35s ease, color 0.35s ease, font-size 0.35s ease;
+  /* Normal wrap only when the line is actually too long — not pretty/balance,
+     which splits medium lines like “from a / dream” before they overflow. */
+  text-wrap: wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: none;
+  white-space: normal;
+  transition: opacity 0.3s ease, color 0.3s ease;
 }
 
-.karaoke-line-active {
-  transform: scale(1.03);
-  transform-origin: left center;
+.karaoke-line-text {
+  display: inline-block;
+  max-width: 100%;
+  text-align: center;
+  transform-origin: center;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.karaoke-line-active .karaoke-line-text {
+  transform: scale(1.05);
 }
 
 .karaoke-seek {
@@ -322,7 +336,8 @@ a,
     animation: none;
   }
   .karaoke-line,
-  .karaoke-line-active {
+  .karaoke-line-active,
+  .karaoke-line-text {
     transition: none;
     transform: none;
   }

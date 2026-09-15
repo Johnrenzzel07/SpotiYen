@@ -14,6 +14,7 @@ export type LookupHit = {
 };
 
 const UA = "SpotiYen/1.0 (private karaoke timing)";
+const MIN_MATCH = 0.48;
 
 function parseTitle(title: string) {
   const parts = title.split(/\s+[-–—]\s+/);
@@ -21,6 +22,13 @@ function parseTitle(title: string) {
     return { artist: parts[0].trim(), track: parts.slice(1).join(" - ").trim() };
   }
   return { artist: "", track: title.trim() };
+}
+
+function artistParts(artist: string) {
+  return artist
+    .split(/[&,/]|feat\.?|ft\.?/i)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 1);
 }
 
 function norm(value: string) {
@@ -34,18 +42,38 @@ function norm(value: string) {
     .trim();
 }
 
+function wordCount(value: string) {
+  return value.split(/\s+/).filter(Boolean).length;
+}
+
 function similar(a: string, b: string) {
   const left = norm(a);
   const right = norm(b);
   if (!left || !right) return 0;
   if (left === right) return 1;
-  if (left.includes(right) || right.includes(left)) return 0.9;
+  const shorter = left.length <= right.length ? left : right;
+  const longer = left.length <= right.length ? right : left;
+  if (shorter.length >= 10 && longer.includes(shorter)) return 0.93;
   const wa = new Set(left.split(" ").filter(Boolean));
   const wb = new Set(right.split(" ").filter(Boolean));
   if (wa.size === 0 || wb.size === 0) return 0;
   let inter = 0;
   for (const word of wa) if (wb.has(word)) inter += 1;
   return (2 * inter) / (wa.size + wb.size);
+}
+
+function phraseContained(a: string, b: string) {
+  const left = norm(a);
+  const right = norm(b);
+  if (!left || !right) return false;
+  const shorter = left.length <= right.length ? left : right;
+  const longer = left.length <= right.length ? right : left;
+  return shorter.length >= 10 && longer.includes(shorter);
+}
+
+function matchScore(user: string, published: string) {
+  if (phraseContained(user, published)) return Math.max(similar(user, published), 0.94);
+  return similar(user, published);
 }
 
 function parseLrc(synced: string): LrcLine[] {
@@ -67,34 +95,126 @@ function isGap(text: string) {
   return /^#?instrumental$/i.test(text.trim()) || text.trim() === "♪";
 }
 
-function alignTimes(userLines: string[], lrc: LrcLine[]) {
-  const times: Array<number | null> = userLines.map(() => null);
-  let cursor = 0;
-  for (let i = 0; i < userLines.length; i++) {
-    if (isGap(userLines[i])) {
-      times[i] = lrc[cursor]?.t ?? (i > 0 ? (times[i - 1] ?? 0) + 4 : 8);
+function usableLrc(lrc: LrcLine[]) {
+  return lrc.filter((line) => line.text && !isGap(line.text));
+}
+
+function strongClause(part: string) {
+  const words = wordCount(part);
+  return words >= 4 || (words >= 3 && part.length >= 20);
+}
+
+function splitLyricClause(text: string): string[] {
+  if (text.length < 28) return [text];
+  const comma = text.split(/,\s+/).map((part) => part.trim()).filter(Boolean);
+  if (comma.length >= 2 && comma.every(strongClause)) return comma;
+  const andSplit = text.split(/\s+and\s+/i).map((part) => part.trim()).filter(Boolean);
+  if (andSplit.length === 2 && andSplit.every(strongClause)) {
+    return [andSplit[0], /^and\b/i.test(andSplit[1]) ? andSplit[1] : `And ${andSplit[1]}`];
+  }
+  return [text];
+}
+
+function explodeLrc(lrc: LrcLine[]): LrcLine[] {
+  const out: LrcLine[] = [];
+  for (let i = 0; i < lrc.length; i++) {
+    const parts = splitLyricClause(lrc[i].text);
+    if (parts.length < 2) {
+      out.push(lrc[i]);
       continue;
     }
-    let best = 0.48;
-    let bestAt = -1;
-    const limit = Math.min(lrc.length, cursor + 10);
-    for (let k = cursor; k < limit; k++) {
-      const score = similar(userLines[i], lrc[k].text);
-      if (score > best) {
-        best = score;
-        bestAt = k;
+    const nextT = lrc[i + 1]?.t ?? lrc[i].t + 8;
+    const span = Math.max(0.6, (nextT - lrc[i].t) * 0.82);
+    const total = parts.reduce((sum, part) => sum + part.length, 0) || 1;
+    let acc = 0;
+    for (const part of parts) {
+      out.push({ t: Number((lrc[i].t + span * (acc / total)).toFixed(3)), text: part });
+      acc += part.length;
+    }
+  }
+  return out;
+}
+
+function alignInOrder(userLines: string[], lrc: LrcLine[]) {
+  if (lrc.length === 0) return userLines.map(() => null);
+  if (userLines.length === 1) return [lrc[0].t];
+  return userLines.map((text, i) => {
+    if (isGap(text) && i > 0) return null;
+    const idx = (i / (userLines.length - 1)) * (lrc.length - 1);
+    const lo = Math.floor(idx);
+    const hi = Math.min(lrc.length - 1, lo + 1);
+    const frac = idx - lo;
+    return lrc[lo].t + (lrc[hi].t - lrc[lo].t) * frac;
+  });
+}
+
+function alignDp(userLines: string[], lrc: LrcLine[]) {
+  const n = userLines.length;
+  const m = lrc.length;
+  if (n === 0 || m === 0) return userLines.map(() => null);
+
+  const NEG = -1e6;
+  const dp: number[][] = Array.from({ length: n + 1 }, () => Array(m + 1).fill(NEG));
+  const prev: number[][] = Array.from({ length: n + 1 }, () => Array(m + 1).fill(0));
+  dp[0][0] = 0;
+  for (let j = 1; j <= m; j++) {
+    dp[0][j] = 0;
+    prev[0][j] = 2;
+  }
+  for (let i = 1; i <= n; i++) {
+    dp[i][0] = dp[i - 1][0] - (isGap(userLines[i - 1]) ? 0 : 0.14);
+    prev[i][0] = 3;
+  }
+
+  for (let i = 1; i <= n; i++) {
+    const user = userLines[i - 1];
+    for (let j = 1; j <= m; j++) {
+      if (isGap(user)) {
+        dp[i][j] = dp[i - 1][j];
+        prev[i][j] = 3;
+        continue;
+      }
+      const score = matchScore(user, lrc[j - 1].text);
+      const diag = dp[i - 1][j - 1] + (score >= MIN_MATCH ? score : score - 0.85);
+      const skipLrc = dp[i][j - 1] - 0.06;
+      const skipUser = dp[i - 1][j] - 0.12;
+      if (diag >= skipLrc && diag >= skipUser) {
+        dp[i][j] = diag;
+        prev[i][j] = 1;
+      } else if (skipLrc >= skipUser) {
+        dp[i][j] = skipLrc;
+        prev[i][j] = 2;
+      } else {
+        dp[i][j] = skipUser;
+        prev[i][j] = 3;
       }
     }
-    if (bestAt >= 0) {
-      times[i] = lrc[bestAt].t;
-      cursor = bestAt + 1;
+  }
+
+  const times: Array<number | null> = userLines.map(() => null);
+  let i = n;
+  let j = m;
+  while (i > 0 || j > 0) {
+    const move = i === 0 ? 2 : j === 0 ? 3 : prev[i][j];
+    if (move === 1) {
+      const score = matchScore(userLines[i - 1], lrc[j - 1].text);
+      if (score >= MIN_MATCH || phraseContained(userLines[i - 1], lrc[j - 1].text)) {
+        times[i - 1] = lrc[j - 1].t;
+      }
+      i -= 1;
+      j -= 1;
+    } else if (move === 2) {
+      j -= 1;
+    } else {
+      i -= 1;
     }
   }
   return times;
 }
 
-function fillHoles(raw: Array<number | null>, durationSec: number) {
-  const cap = Math.max(1, durationSec - 0.25);
+function fillHoles(raw: Array<number | null>, durationSec: number, lastPublished?: number) {
+  const cap = Math.max(1, durationSec - 0.4);
+  const finish = Math.min(cap, lastPublished && lastPublished > 1 ? lastPublished : cap);
   const times = raw.map((t) => (t != null && Number.isFinite(t) ? t : NaN));
   let lastKnown = -1;
   for (let i = 0; i < times.length; i++) {
@@ -108,39 +228,49 @@ function fillHoles(raw: Array<number | null>, durationSec: number) {
       }
     } else {
       for (let k = 0; k < i; k++) {
-        times[k] = Math.max(0.4, times[i] - (i - k) * 3.2);
+        times[k] = Math.max(0.3, times[i] * ((k + 1) / (i + 1)));
       }
     }
     lastKnown = i;
   }
-  if (lastKnown >= 0) {
-    for (let i = lastKnown + 1; i < times.length; i++) {
-      times[i] = times[i - 1] + 3.4;
+  if (lastKnown >= 0 && lastKnown < times.length - 1) {
+    const start = times[lastKnown];
+    const rest = times.length - 1 - lastKnown;
+    const room = Math.max(0, finish - start);
+    const end = room >= rest * 1.4 ? finish : Math.min(cap, start + rest * 2.2);
+    for (let k = 1; k <= rest; k++) {
+      times[lastKnown + k] = start + ((end - start) * k) / rest;
     }
   }
   let prev = 0;
   return times.map((t, i) => {
-    let next = Number.isFinite(t) ? t : prev + 3;
-    next = Math.min(cap, Math.max(i === 0 ? 0.2 : prev + 0.12, next));
+    let next = Number.isFinite(t) ? t : prev + 2;
+    next = Math.min(cap, Math.max(i === 0 ? 0.2 : prev + 0.25, next));
     prev = next;
     return Number(next.toFixed(2));
   });
 }
 
-function recordScore(row: LrcRecord, artist: string, track: string, durationSec: number) {
-  if (!row.syncedLyrics) return -1;
-  const durationScore =
-    typeof row.duration === "number"
-      ? Math.max(0, 1 - Math.abs(row.duration - durationSec) / 18)
-      : 0.2;
-  return (
-    similar(row.trackName || "", track) * 4 +
-    similar(row.artistName || "", artist) * 2 +
-    durationScore * 3
-  );
+function durationClose(rowDuration: number | undefined, durationSec: number) {
+  if (typeof rowDuration !== "number") return true;
+  if (durationSec <= 30) return true;
+  const abs = Math.abs(rowDuration - durationSec);
+  return abs <= Math.max(8, durationSec * 0.06);
 }
 
-async function lrclibGet(params: Record<string, string>) {
+function recordScore(row: LrcRecord, artist: string, track: string, durationSec: number) {
+  if (!row.syncedLyrics) return -1;
+  if (!durationClose(row.duration, durationSec)) return -1;
+  const durationScore =
+    typeof row.duration === "number"
+      ? Math.max(0, 1 - Math.abs(row.duration - durationSec) / Math.max(durationSec, 1))
+      : 0.2;
+  const names = [artist, ...artistParts(artist)];
+  const artistScore = Math.max(0, ...names.map((name) => similar(row.artistName || "", name)));
+  return similar(row.trackName || "", track) * 4 + artistScore * 2 + durationScore * 6;
+}
+
+async function lrclibSearch(params: Record<string, string>) {
   const url = new URL("https://lrclib.net/api/search");
   for (const [key, value] of Object.entries(params)) {
     if (value) url.searchParams.set(key, value);
@@ -154,22 +284,72 @@ async function lrclibGet(params: Record<string, string>) {
   return Array.isArray(data) ? (data as LrcRecord[]) : [];
 }
 
+async function lrclibExact(artist: string, track: string, durationSec: number) {
+  const url = new URL("https://lrclib.net/api/get");
+  url.searchParams.set("track_name", track);
+  if (artist) url.searchParams.set("artist_name", artist);
+  if (durationSec > 20) url.searchParams.set("duration", String(Math.round(durationSec)));
+  const res = await fetch(url, {
+    headers: { "User-Agent": UA, Accept: "application/json" },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) return null;
+  const data = (await res.json()) as LrcRecord;
+  return data?.syncedLyrics ? data : null;
+}
+
+function stampFromRecord(best: LrcRecord, userLines: string[], durationSec: number, track: string): LookupHit | null {
+  const exploded = explodeLrc(usableLrc(parseLrc(best.syncedLyrics || "")));
+  if (exploded.length < 2) return null;
+
+  const aligned = alignDp(userLines, exploded);
+  const hits = aligned.filter((t) => t != null).length;
+  const used = hits >= Math.max(3, Math.floor(userLines.length * 0.35)) ? aligned : alignInOrder(userLines, exploded);
+
+  const ratio =
+    typeof best.duration === "number" && best.duration > 20 ? durationSec / best.duration : 1;
+  const scale = ratio > 0.92 && ratio < 1.08 ? ratio : 1;
+  const scaled = used.map((t) => (t == null ? null : t * scale));
+  const lastPublished = (exploded[exploded.length - 1]?.t ?? durationSec) * scale;
+
+  return {
+    times: fillHoles(scaled, durationSec, lastPublished),
+    source: `lrclib:${best.artistName || "unknown"} – ${best.trackName || track}`,
+    matched: scaled.filter((t) => t != null).length,
+  };
+}
+
 export async function lookupPublishedTimes(
   title: string,
   durationSec: number,
   userLines: string[]
 ): Promise<LookupHit | null> {
   const { artist, track } = parseTitle(title);
+  const artists = [artist, ...artistParts(artist)].filter(Boolean);
+
+  for (const name of artists) {
+    try {
+      const exact = await lrclibExact(name, track, durationSec);
+      if (exact && recordScore(exact, artist, track, durationSec) > 0) {
+        const hit = stampFromRecord(exact, userLines, durationSec, track);
+        if (hit) return hit;
+      }
+    } catch {
+      /* try search */
+    }
+  }
+
   const queries: Record<string, string>[] = [];
-  if (artist) queries.push({ track_name: track, artist_name: artist });
+  if (track && artists[0]) queries.push({ track_name: track, artist_name: artists[0] });
+  if (track) queries.push({ track_name: track });
   queries.push({ q: title });
   if (track !== title) queries.push({ q: track });
 
   let best: LrcRecord | null = null;
-  let bestScore = 1.8;
+  let bestScore = 0.8;
   for (const query of queries) {
     try {
-      const rows = await lrclibGet(query);
+      const rows = await lrclibSearch(query);
       for (const row of rows) {
         const score = recordScore(row, artist, track, durationSec);
         if (score > bestScore) {
@@ -177,23 +357,13 @@ export async function lookupPublishedTimes(
           bestScore = score;
         }
       }
-      if (best?.syncedLyrics) break;
     } catch {
       /* try the next query */
     }
   }
 
   if (!best?.syncedLyrics) return null;
-  const lrc = parseLrc(best.syncedLyrics);
-  if (lrc.length < 4) return null;
-  const aligned = alignTimes(userLines, lrc);
-  const matched = aligned.filter((t) => t != null).length;
-  if (matched < Math.max(3, Math.floor(userLines.length * 0.35))) return null;
-  return {
-    times: fillHoles(aligned, durationSec),
-    source: `lrclib:${best.artistName || "unknown"} – ${best.trackName || track}`,
-    matched,
-  };
+  return stampFromRecord(best, userLines, durationSec, track);
 }
 
 export async function groqWebTimes(
@@ -203,13 +373,8 @@ export async function groqWebTimes(
   userLines: string[]
 ): Promise<LookupHit | null> {
   const numbered = userLines.map((line, i) => `${i + 1}. ${line}`).join("\n");
-  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${groqKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  const bodies = [
+    {
       model: "groq/compound",
       temperature: 0.05,
       compound_custom: {
@@ -218,15 +383,35 @@ export async function groqWebTimes(
       search_settings: {
         include_domains: ["lrclib.net", "lyricsify.com", "megalobiz.com"],
       },
-      messages: [
-        {
-          role: "system",
-          content:
-            "You look up published karaoke/LRC timestamps on the web. You never invent times. You never replace the user's lyric text. Reply with JSON only.",
-        },
-        {
-          role: "user",
-          content: `Find a published LRC or synced-lyrics timing sheet for this recording:
+      messages: groqMessages(title, durationSec, numbered, userLines.length),
+    },
+    {
+      model: "groq/compound",
+      temperature: 0.05,
+      compound_custom: {
+        tools: { enabled_tools: ["web_search", "visit_website"] },
+      },
+      messages: groqMessages(title, durationSec, numbered, userLines.length),
+    },
+  ];
+
+  for (const body of bodies) {
+    const hit = await groqWebOnce(groqKey, body, durationSec, userLines.length);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function groqMessages(title: string, durationSec: number, numbered: string, count: number) {
+  return [
+    {
+      role: "system",
+      content:
+        "You look up published karaoke/LRC timestamps on the web. You never invent times. You never replace the user's lyric text. Reply with JSON only.",
+    },
+    {
+      role: "user",
+      content: `Find a published LRC or synced-lyrics timing sheet for this recording:
 Title: ${title}
 Duration: ${durationSec.toFixed(1)} seconds
 
@@ -237,11 +422,25 @@ ${numbered}
 
 Return JSON:
 {"found":true,"source":"https://...","times":[12.04,15.2,null,...]}
-times MUST have length ${userLines.length}.
+times MUST have length ${count}.
 If no published timing sheet exists, return {"found":false,"times":[]}`,
-        },
-      ],
-    }),
+    },
+  ];
+}
+
+async function groqWebOnce(
+  groqKey: string,
+  body: Record<string, unknown>,
+  durationSec: number,
+  lineCount: number
+): Promise<LookupHit | null> {
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${groqKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
   });
 
   const data = (await res.json()) as {
@@ -270,7 +469,7 @@ If no published timing sheet exists, return {"found":false,"times":[]}`,
     return Number.isFinite(n) ? n : null;
   });
   const matched = aligned.filter((t) => t != null).length;
-  if (matched < Math.max(3, Math.floor(userLines.length * 0.35))) return null;
+  if (matched < Math.max(2, Math.floor(lineCount * 0.2))) return null;
   return {
     times: fillHoles(aligned, durationSec),
     source: typeof parsed.source === "string" ? parsed.source : "web",

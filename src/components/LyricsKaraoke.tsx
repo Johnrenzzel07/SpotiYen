@@ -148,9 +148,9 @@ export default function LyricsKaraoke() {
 
       <div
         ref={listRef}
-        className="karaoke-scroll relative z-10 flex-1 overflow-y-auto px-6 md:px-10 py-8"
+        className="karaoke-scroll relative z-10 flex-1 overflow-y-auto px-6 md:px-16 py-8"
       >
-        <div className="max-w-2xl mx-auto min-h-full flex flex-col justify-center">
+        <div className="max-w-4xl mx-auto min-h-full flex flex-col justify-center">
           {lines.length === 0 ? (
             <div className="text-center py-16">
               <Captions size={42} className="mx-auto mb-4 opacity-70" />
@@ -201,25 +201,26 @@ export default function LyricsKaraoke() {
                       lineRefs.current[index] = el;
                     }}
                     onClick={() => onLineClick(index)}
-                    className={`karaoke-line block w-full text-left py-2.5 md:py-3 ${
+                    className={`karaoke-line block w-full text-center py-2 md:py-2.5 ${
                       isActive ? "karaoke-line-active" : ""
                     }`}
                     style={{
                       color: isActive ? theme.active : theme.dim,
-                      opacity: passed ? 0.45 : 1,
+                      opacity: passed ? 0.42 : 1,
                       fontStyle: instrumental ? "italic" : "normal",
+                      /* Same size for every line so becoming active never reflows. */
                       fontSize: synced
-                        ? isActive
-                          ? "clamp(1.7rem, 4.6vw, 3.1rem)"
-                          : "clamp(1.2rem, 3.2vw, 2.15rem)"
-                        : "clamp(1.15rem, 2.8vw, 1.85rem)",
+                        ? "clamp(1.35rem, 2.5vw, 2.05rem)"
+                        : "clamp(1.2rem, 2.2vw, 1.75rem)",
                       fontWeight: isActive || !synced ? 800 : 700,
                       lineHeight: 1.25,
                       cursor: synced && line.t > 0 ? "pointer" : "default",
                     }}
                     aria-current={isActive ? "true" : undefined}
                   >
-                    {instrumental ? "♪ Instrumental" : line.text}
+                    <span className="karaoke-line-text">
+                      {instrumental ? "♪ Instrumental" : line.text}
+                    </span>
                   </button>
                 );
               })}

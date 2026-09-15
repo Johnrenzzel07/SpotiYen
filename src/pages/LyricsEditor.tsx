@@ -149,8 +149,8 @@ export default function LyricsEditor() {
       return;
     }
     const durationSec = finiteDuration(
-      isActive ? duration : 0,
-      track.durationMs
+      track.durationMs / 1000,
+      (isActive ? duration : 0) * 1000
     );
     if (durationSec < 20) {
       setError("Play the song once so we know its length, then tap Auto-time.");
