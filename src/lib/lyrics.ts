@@ -32,6 +32,24 @@ export function applyLyricTimes(lines: LyricLine[], times: number[]): LyricLine[
   });
 }
 
+export function offsetLyricTimes(
+  lines: LyricLine[],
+  deltaSec: number,
+  maxSec = Number.POSITIVE_INFINITY
+): LyricLine[] {
+  if (!Number.isFinite(deltaSec) || deltaSec === 0) return lines;
+  const cap = Number.isFinite(maxSec) && maxSec > 1 ? maxSec - 0.05 : Number.POSITIVE_INFINITY;
+  let prev = 0;
+  return lines.map((line, index) => {
+    if (line.t <= 0) return line;
+    let next = line.t + deltaSec;
+    const floor = index === 0 || prev <= 0 ? 0.05 : prev + 0.05;
+    next = Math.min(cap, Math.max(floor, next));
+    prev = next;
+    return { ...line, t: Number(next.toFixed(2)) };
+  });
+}
+
 export function lyricsAreSynced(lines: LyricLine[]) {
   return lines.some((line) => line.t > 0);
 }

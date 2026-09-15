@@ -3,6 +3,7 @@ import { Link, Navigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   Captions,
+  Clock,
   Minus,
   Pause,
   Play,
@@ -18,7 +19,7 @@ import ClayCover from "../components/ClayCover";
 import ClaySpinner, { ButtonDots, LibrarySkeleton } from "../components/ClaySpinner";
 import { coverPublicUrl } from "../lib/db";
 import { finiteDuration, formatTimeFromSec } from "../lib/audio";
-import { applyLyricTimes, formatStamp, lyricsAreSynced, lyricsFromText } from "../lib/lyrics";
+import { applyLyricTimes, formatStamp, lyricsAreSynced, lyricsFromText, offsetLyricTimes } from "../lib/lyrics";
 import { requestLyricTimes } from "../lib/lyricsSync";
 import type { LyricLine } from "../types";
 
@@ -46,6 +47,7 @@ export default function LyricsEditor() {
   const [saved, setSaved] = useState(false);
   const [timedFrom, setTimedFrom] = useState("");
   const [loadedId, setLoadedId] = useState("");
+  const [delayDraft, setDelayDraft] = useState("0");
 
   useEffect(() => {
     if (!track || loadedId === track.id) return;
@@ -55,6 +57,7 @@ export default function LyricsEditor() {
     setError("");
     setSaved(false);
     setTimedFrom("");
+    setDelayDraft("0");
   }, [track, loadedId]);
 
   const timedCount = lines.filter((line) => line.t > 0).length;
@@ -138,6 +141,33 @@ export default function LyricsEditor() {
     setSaved(false);
   }
 
+  const durationCap = finiteDuration(track.durationMs / 1000, (isActive ? duration : 0) * 1000);
+
+  function parseDelay() {
+    const value = Number(delayDraft);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function shiftAll(deltaSec: number) {
+    if (!deltaSec) return;
+    if (!lyricsAreSynced(lines)) {
+      setError("Time the lyrics first, then add a delay.");
+      return;
+    }
+    setLines((prev) => offsetLyricTimes(prev, deltaSec, durationCap || Number.POSITIVE_INFINITY));
+    setError("");
+    setSaved(false);
+  }
+
+  function applyDelay() {
+    const delta = parseDelay();
+    if (!delta) {
+      setError("Enter a delay in seconds, like 8.5 or -1.2.");
+      return;
+    }
+    shiftAll(delta);
+  }
+
   async function autoTime() {
     if (!track) return;
     const next = lyricsFromText(draft).map((line, index) => ({
@@ -166,9 +196,17 @@ export default function LyricsEditor() {
         durationSec,
         lines: next.map((line) => line.text),
       });
-      setLines(applyLyricTimes(next, result.times));
+      const stamped = applyLyricTimes(next, result.times);
+      const delay = parseDelay();
+      setLines(
+        delay ? offsetLyricTimes(stamped, delay, durationCap || Number.POSITIVE_INFINITY) : stamped
+      );
       setDraft(next.map((line) => line.text).join("\n"));
-      setTimedFrom(result.source);
+      setTimedFrom(
+        delay
+          ? `${result.source}, then ${delay > 0 ? "+" : ""}${delay.toFixed(2)}s delay`
+          : result.source
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not auto-time those lyrics.");
     } finally {
@@ -233,7 +271,7 @@ export default function LyricsEditor() {
 
       <div className="clay p-4 mb-5" style={{ background: "white" }}>
         <p className="text-sm font-semibold leading-relaxed" style={{ color: "var(--soft-ink)" }}>
-          Paste one lyric per line. Auto-time looks up a published karaoke/LRC timing sheet for this title and stamps those seconds onto your lines.
+          Paste one lyric per line. Auto-time looks up a published karaoke/LRC timing sheet for this title and stamps those seconds onto your lines. If this upload is a YouTube video with an intro, add a delay so the stamps wait for the music.
         </p>
       </div>
 
@@ -344,6 +382,83 @@ export default function LyricsEditor() {
         </button>
       </div>
 
+      <div className="clay p-4 mb-6" style={{ background: "white" }}>
+        <div className="flex items-start gap-2 mb-2">
+          <Clock size={16} className="mt-0.5 flex-shrink-0" style={{ color: "var(--ink)" }} />
+          <div>
+            <p className="text-xs font-extrabold uppercase tracking-wider" style={{ color: "var(--ink)" }}>
+              Sync delay
+            </p>
+            <p className="text-sm font-semibold leading-relaxed" style={{ color: "var(--soft-ink)" }}>
+              YouTube videos often start later than Spotify. Positive delay waits (intro). Negative brings lyrics in sooner.
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 mt-3">
+          <button
+            type="button"
+            onClick={() => shiftAll(-1)}
+            className="clay-btn px-3 py-2 text-sm font-extrabold"
+            style={{ background: "var(--cream)", color: "var(--ink)" }}
+          >
+            −1s
+          </button>
+          <button
+            type="button"
+            onClick={() => shiftAll(-0.5)}
+            className="clay-btn px-3 py-2 text-sm font-extrabold"
+            style={{ background: "var(--cream)", color: "var(--ink)" }}
+          >
+            −0.5s
+          </button>
+          <label className="inline-flex items-center gap-1.5">
+            <span className="sr-only">Delay in seconds</span>
+            <input
+              type="number"
+              step={0.1}
+              value={delayDraft}
+              onChange={(e) => setDelayDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  applyDelay();
+                }
+              }}
+              className="clay w-24 px-3 py-2 text-sm font-extrabold tabular-nums text-center"
+              style={{ background: "var(--cream)", color: "var(--ink)", outline: "none" }}
+              aria-label="Delay in seconds"
+            />
+            <span className="text-xs font-extrabold" style={{ color: "var(--soft-ink)" }}>
+              sec
+            </span>
+          </label>
+          <button
+            type="button"
+            onClick={() => shiftAll(0.5)}
+            className="clay-btn px-3 py-2 text-sm font-extrabold"
+            style={{ background: "var(--cream)", color: "var(--ink)" }}
+          >
+            +0.5s
+          </button>
+          <button
+            type="button"
+            onClick={() => shiftAll(1)}
+            className="clay-btn px-3 py-2 text-sm font-extrabold"
+            style={{ background: "var(--cream)", color: "var(--ink)" }}
+          >
+            +1s
+          </button>
+          <button
+            type="button"
+            onClick={applyDelay}
+            className="clay-btn px-4 py-2 text-sm font-extrabold"
+            style={{ background: "var(--clay-mint)", color: "var(--ink)" }}
+          >
+            Apply delay
+          </button>
+        </div>
+      </div>
+
       <div className="flex items-center justify-between mb-3">
         <p className="text-xs font-extrabold uppercase tracking-wider" style={{ color: "var(--soft-ink)" }}>
           Timing · {timedCount}/{lines.length} {synced ? "synced" : "not synced yet"}
@@ -418,7 +533,7 @@ export default function LyricsEditor() {
       )}
       {timedFrom && (
         <p className="text-sm font-semibold mb-3" style={{ color: "var(--ink)" }}>
-          Timed from published karaoke times ({timedFrom}). Nudge anything that’s off, then save.
+          Timed from published karaoke times ({timedFrom}). Add a delay if this upload has a YouTube intro, then save.
         </p>
       )}
       {saved && (
