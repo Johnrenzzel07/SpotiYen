@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { groqWebTimes, lookupPublishedTimes } from "./lrcLookup.ts";
+import { groqWebTimes, lookupPublishedTimes } from "./lrcLookup.js";
 
 type SyncInput = {
   title: string;
@@ -56,74 +56,80 @@ async function requireAdmin(authHeader: string | null) {
 }
 
 export async function handleLyricsSync(request: Request): Promise<Response> {
-  if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204 });
-  }
-  if (request.method !== "POST") {
-    return json(405, { error: "POST only" });
-  }
-
   try {
-    await requireAdmin(request.headers.get("authorization"));
-  } catch (err) {
-    return json(403, { error: err instanceof Error ? err.message : "Not allowed." });
-  }
-
-  let payload: SyncInput;
-  try {
-    payload = (await request.json()) as SyncInput;
-  } catch {
-    return json(400, { error: "Could not read that request." });
-  }
-
-  const title = String(payload.title || "Untitled").slice(0, 180);
-  const durationSec = Number(payload.durationSec);
-  const lines = Array.isArray(payload.lines)
-    ? payload.lines.map((line) => String(line).trim()).filter(Boolean).slice(0, 200)
-    : [];
-
-  if (lines.length < 2) {
-    return json(400, { error: "Paste at least two lyric lines first." });
-  }
-  if (!Number.isFinite(durationSec) || durationSec < 20) {
-    return json(400, { error: "This song needs a duration before AI can time it." });
-  }
-
-  try {
-    const published = await lookupPublishedTimes(title, durationSec, lines);
-    if (published) {
-      return json(200, {
-        times: published.times,
-        source: published.source,
-        matched: published.matched,
-      });
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204 });
     }
-  } catch {
-    /* fall through to Groq web search */
-  }
+    if (request.method !== "POST") {
+      return json(405, { error: "POST only" });
+    }
 
-  if (groqKey()) {
     try {
-      const web = await groqWebTimes(groqKey(), title, durationSec, lines);
-      if (web) {
+      await requireAdmin(request.headers.get("authorization"));
+    } catch (err) {
+      return json(403, { error: err instanceof Error ? err.message : "Not allowed." });
+    }
+
+    let payload: SyncInput;
+    try {
+      payload = (await request.json()) as SyncInput;
+    } catch {
+      return json(400, { error: "Could not read that request." });
+    }
+
+    const title = String(payload.title || "Untitled").slice(0, 180);
+    const durationSec = Number(payload.durationSec);
+    const lines = Array.isArray(payload.lines)
+      ? payload.lines.map((line) => String(line).trim()).filter(Boolean).slice(0, 200)
+      : [];
+
+    if (lines.length < 2) {
+      return json(400, { error: "Paste at least two lyric lines first." });
+    }
+    if (!Number.isFinite(durationSec) || durationSec < 20) {
+      return json(400, { error: "This song needs a duration before AI can time it." });
+    }
+
+    try {
+      const published = await lookupPublishedTimes(title, durationSec, lines);
+      if (published) {
         return json(200, {
-          times: web.times,
-          source: web.source,
-          matched: web.matched,
+          times: published.times,
+          source: published.source,
+          matched: published.matched,
         });
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "";
-      if (/api key|unauthorized|invalid.*key/i.test(message)) {
-        return json(502, {
-          error: "Groq rejected the API key. Check groq_api_key in .env.",
-        });
+    } catch {
+      /* fall through to Groq web search */
+    }
+
+    if (groqKey()) {
+      try {
+        const web = await groqWebTimes(groqKey(), title, durationSec, lines);
+        if (web) {
+          return json(200, {
+            times: web.times,
+            source: web.source,
+            matched: web.matched,
+          });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "";
+        if (/api key|unauthorized|invalid.*key/i.test(message)) {
+          return json(502, {
+            error: "Groq rejected the API key. Check groq_api_key in .env.",
+          });
+        }
       }
     }
-  }
 
-  return json(404, {
-    error:
-      "No published karaoke timestamps were found for that title. Check the song name (Artist - Title) or stamp the lines by hand.",
-  });
+    return json(404, {
+      error:
+        "No published karaoke timestamps were found for that title. Check the song name (Artist - Title) or stamp the lines by hand.",
+    });
+  } catch (err) {
+    return json(500, {
+      error: err instanceof Error ? err.message : "Lyrics sync failed.",
+    });
+  }
 }
