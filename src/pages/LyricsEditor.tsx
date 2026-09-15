@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -9,6 +9,7 @@ import {
   Play,
   Plus,
   Save,
+  Search,
   Sparkles,
   TimerReset,
 } from "lucide-react";
@@ -49,6 +50,9 @@ export default function LyricsEditor() {
   const [loadedId, setLoadedId] = useState("");
   const [delayDraft, setDelayDraft] = useState("0");
   const [templates, setTemplates] = useState<LyricTemplate[]>([]);
+  const [lrcQuery, setLrcQuery] = useState("");
+  const [lrcMissed, setLrcMissed] = useState(false);
+  const lrcSearchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!track || loadedId === track.id) return;
@@ -60,6 +64,8 @@ export default function LyricsEditor() {
     setTimedFrom("");
     setDelayDraft("0");
     setTemplates([]);
+    setLrcQuery(track.title);
+    setLrcMissed(false);
   }, [track, loadedId]);
 
   const timedCount = lines.filter((line) => line.t > 0).length;
@@ -215,18 +221,27 @@ export default function LyricsEditor() {
     setSaved(false);
     setTimedFrom("");
     setTemplates([]);
+    const query = lrcQuery.trim() || track.title;
     try {
       const result = await requestLyricTimes({
         title: track.title,
+        query,
+        loose: lrcMissed || query !== track.title.trim(),
         durationSec,
         lines: next.map((line) => line.text),
       });
       setTemplates(result.templates);
+      setLrcMissed(false);
       if (result.templates.length === 1) {
         applyTemplate(result.templates[0], next);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not auto-time those lyrics.");
+      const message = err instanceof Error ? err.message : "Could not auto-time those lyrics.";
+      setError(message);
+      if (/no published/i.test(message)) {
+        setLrcMissed(true);
+        window.setTimeout(() => lrcSearchRef.current?.focus(), 50);
+      }
     } finally {
       setSyncing(false);
     }
@@ -393,6 +408,53 @@ export default function LyricsEditor() {
           Clear times
         </button>
       </div>
+
+      <form
+        className="clay p-3 sm:p-4 mb-6"
+        style={{ background: "white" }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          void autoTime();
+        }}
+      >
+        <p className="text-xs font-extrabold uppercase tracking-wider mb-1" style={{ color: "var(--ink)" }}>
+          LRCLIB search
+        </p>
+        <p
+          className="text-sm font-semibold leading-snug mb-3"
+          style={{ color: lrcMissed ? "var(--record-red)" : "var(--soft-ink)" }}
+        >
+          {lrcMissed
+            ? "Nothing matched that title. Search Artist – Song, like The Weeknd - Reminder."
+            : "Auto-time looks up this name. Change it if the upload title doesn’t match LRCLIB."}
+        </p>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <label className="flex-1 min-w-0">
+            <span className="sr-only">Search LRCLIB</span>
+            <input
+              ref={lrcSearchRef}
+              type="search"
+              value={lrcQuery}
+              onChange={(e) => {
+                setLrcQuery(e.target.value);
+                if (lrcMissed) setLrcMissed(false);
+              }}
+              placeholder="Artist - Title"
+              className="clay w-full min-h-11 px-3 text-sm font-semibold"
+              style={{ background: "var(--cream)", color: "var(--ink)", outline: "none" }}
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={syncing || busy}
+            className="clay-btn min-h-11 px-4 py-2.5 text-sm font-extrabold inline-flex items-center justify-center gap-1.5"
+            style={{ background: "var(--clay-peach)", color: "var(--ink)" }}
+          >
+            {syncing ? <ButtonDots ink /> : <Search size={16} />}
+            Search
+          </button>
+        </div>
+      </form>
 
       {templates.length > 0 && (
         <div className="clay p-3 sm:p-4 mb-6" style={{ background: "white" }}>
@@ -605,7 +667,7 @@ export default function LyricsEditor() {
         )}
       </div>
 
-      {error && (
+      {error && !lrcMissed && (
         <p className="text-sm font-semibold mb-3" style={{ color: "var(--record-red)" }}>
           {error}
         </p>

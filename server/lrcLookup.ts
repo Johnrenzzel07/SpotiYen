@@ -308,7 +308,14 @@ function durationClose(rowDuration: number | undefined, durationSec: number) {
   return abs <= Math.max(8, durationSec * 0.06);
 }
 
-function recordScore(row: LrcRecord, artist: string, track: string, durationSec: number, strictDuration: boolean) {
+function recordScore(
+  row: LrcRecord,
+  artist: string,
+  track: string,
+  durationSec: number,
+  strictDuration: boolean,
+  loose = false
+) {
   if (!row.syncedLyrics) return -1;
   if (strictDuration && !durationClose(row.duration, durationSec)) return -1;
   const durationScore =
@@ -320,8 +327,12 @@ function recordScore(row: LrcRecord, artist: string, track: string, durationSec:
     ? Math.max(0, ...names.map((name) => artistSimilar(row.artistName || "", name)))
     : 0;
   const trackScore = Math.max(similar(row.trackName || "", track), similar(row.trackName || "", `${artist} ${track}`));
-  if (artist && artistScore < 0.55) return -1;
-  if (trackScore < 0.28 && artistScore < 0.4) return -1;
+  if (!loose && artist && artistScore < 0.55) return -1;
+  if (trackScore < 0.28 && artistScore < 0.4) {
+    if (!loose) return -1;
+    const haystack = `${row.trackName || ""} ${row.artistName || ""} ${row.albumName || ""}`;
+    if (similar(haystack, `${artist} ${track}`.trim() || track) < 0.2) return -1;
+  }
   return trackScore * 4 + artistScore * 2 + durationScore * 3;
 }
 
@@ -438,13 +449,24 @@ async function collectRecords(title: string, durationSec: number) {
 export async function lookupPublishedTemplates(
   title: string,
   durationSec: number,
-  userLines: string[]
+  userLines: string[],
+  loose = false
 ): Promise<LookupHit[]> {
   const { artist, track, records } = await collectRecords(title, durationSec);
-  const ranked = records
-    .map((row) => ({ row, score: recordScore(row, artist, track, durationSec, false) }))
+  let ranked = records
+    .map((row) => ({ row, score: recordScore(row, artist, track, durationSec, false, loose) }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score);
+
+  if (loose && ranked.length === 0) {
+    ranked = records
+      .filter((row) => Boolean(row.syncedLyrics))
+      .map((row) => ({
+        row,
+        score: recordScore(row, artist, track, durationSec, false, true) + 0.01,
+      }))
+      .sort((a, b) => b.score - a.score);
+  }
 
   const unique: LookupHit[] = [];
   const seen = new Set<string>();

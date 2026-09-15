@@ -33,6 +33,8 @@ export async function requestLyricTimes(params: {
   title: string;
   durationSec: number;
   lines: string[];
+  query?: string;
+  loose?: boolean;
 }): Promise<{ templates: LyricTemplate[] }> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;

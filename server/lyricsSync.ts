@@ -5,6 +5,8 @@ type SyncInput = {
   title: string;
   durationSec: number;
   lines: string[];
+  query?: string;
+  loose?: boolean;
 };
 
 function groqKey() {
@@ -77,7 +79,8 @@ export async function handleLyricsSync(request: Request): Promise<Response> {
       return json(400, { error: "Could not read that request." });
     }
 
-    const title = String(payload.title || "Untitled").slice(0, 180);
+    const title = String(payload.query || payload.title || "Untitled").slice(0, 180);
+    const loose = Boolean(payload.loose) || Boolean(payload.query && payload.query.trim() !== String(payload.title || "").trim());
     const durationSec = Number(payload.durationSec);
     const lines = Array.isArray(payload.lines)
       ? payload.lines.map((line) => String(line).trim()).filter(Boolean).slice(0, 200)
@@ -91,7 +94,7 @@ export async function handleLyricsSync(request: Request): Promise<Response> {
     }
 
     try {
-      const templates = await lookupPublishedTemplates(title, durationSec, lines);
+      const templates = await lookupPublishedTemplates(title, durationSec, lines, loose);
       if (templates.length > 0) {
         return json(200, { templates });
       }
@@ -99,7 +102,7 @@ export async function handleLyricsSync(request: Request): Promise<Response> {
       /* fall through to Groq web search */
     }
 
-    if (groqKey()) {
+    if (!loose && groqKey()) {
       try {
         const web = await groqWebTimes(groqKey(), title, durationSec, lines);
         if (web) {
@@ -118,8 +121,7 @@ export async function handleLyricsSync(request: Request): Promise<Response> {
     }
 
     return json(404, {
-      error:
-        "No published karaoke timestamps were found for that title. Check the song name (Artist - Title) or stamp the lines by hand.",
+      error: "No published timestamps came back for that song.",
     });
   } catch (err) {
     return json(500, {
