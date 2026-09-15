@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { groqWebTimes, lookupPublishedTimes } from "./lrcLookup.js";
+import { groqWebTimes, lookupPublishedTimes } from "./lrcLookup.ts";
 
 type SyncInput = {
   title: string;
