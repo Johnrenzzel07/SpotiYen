@@ -259,6 +259,74 @@ a,
 .loading-dot-ink {
   background: var(--ink);
 }
+
+.karaoke-scroll {
+  scrollbar-width: none;
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 8%, #000 88%, transparent 100%);
+}
+.karaoke-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.karaoke-line {
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.35s ease, color 0.35s ease, font-size 0.35s ease;
+}
+
+.karaoke-line-active {
+  transform: scale(1.03);
+  transform-origin: left center;
+}
+
+.karaoke-seek {
+  height: 6px;
+  cursor: pointer;
+}
+
+@keyframes player-more-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.player-more-menu {
+  animation: player-more-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.player-more-item {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.player-more-item:first-child {
+  border-radius: 16px 16px 0 0;
+}
+
+.player-more-item:last-child {
+  border-radius: 0 0 16px 16px;
+}
+
+.player-more-item:first-child:last-child {
+  border-radius: 16px;
+}
+
+.player-more-item:hover {
+  background: rgba(244, 239, 230, 0.9);
+}
+
+.player-more-item:active {
+  background: var(--cream);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-more-menu {
+    animation: none;
+  }
+  .karaoke-line,
+  .karaoke-line-active {
+    transition: none;
+    transform: none;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .animate-pop-in,
   .animate-slide-up,

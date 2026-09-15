@@ -7,19 +7,23 @@ import { useCollections } from "../context/CollectionContext";
 import { usePlayer } from "../context/PlayerContext";
 import ClayCover from "../components/ClayCover";
 import TrackCard from "../components/TrackCard";
+import ConfirmDialog from "../components/ConfirmDialog";
 import { coverPublicUrl } from "../lib/db";
 import ClaySpinner, { CollectionSkeleton } from "../components/ClaySpinner";
+import type { Track } from "../types";
 
 export default function CollectionDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { tracks, ownerName } = useTracks();
-  const { collections, loading, removeTrack, remove, setCover } = useCollections();
-  const { play, setQueue } = usePlayer();
+  const { tracks, ownerName, deleteTrack } = useTracks();
+  const { collections, loading, remove, setCover } = useCollections();
+  const { play, currentTrack, stop } = usePlayer();
   const [error, setError] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [coverBusy, setCoverBusy] = useState(false);
+  const [pending, setPending] = useState<Track | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const collection = collections.find((c) => c.id === id);
 
@@ -48,12 +52,12 @@ export default function CollectionDetail() {
   }
 
   const isOwner = user?.id === collection.ownerId;
+  const isAdmin = user?.role === "admin";
   const isAlbum = collection.kind === "album";
 
   function playAll() {
     if (members.length === 0) return;
-    setQueue(members);
-    play(members[0]);
+    play(members[0], members);
   }
 
   async function handleCoverPhoto(file: File) {
@@ -208,15 +212,38 @@ export default function CollectionDetail() {
               track={t}
               index={i}
               queue={members}
-              onRemove={
-                isOwner
-                  ? () => void removeTrack(collection.id, t.id)
-                  : undefined
-              }
+              onDelete={isAdmin ? () => setPending(t) : undefined}
             />
           ))
         )}
       </div>
+      {pending && (
+        <ConfirmDialog
+          title={`Delete “${pending.title}”?`}
+          message="This removes the song and its audio from SpotiYen. It cannot be undone."
+          confirmLabel="Delete song"
+          busy={busy}
+          onConfirm={() => {
+            void (async () => {
+              setBusy(true);
+              setError("");
+              try {
+                const id = pending.id;
+                await deleteTrack(id);
+                if (currentTrack?.id === id) stop();
+                setPending(null);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Could not delete that song.");
+              } finally {
+                setBusy(false);
+              }
+            })();
+          }}
+          onCancel={() => {
+            if (!busy) setPending(null);
+          }}
+        />
+      )}
     </div>
   );
 }

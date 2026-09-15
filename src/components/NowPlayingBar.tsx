@@ -1,14 +1,16 @@
 import {
-  Play,
-  Pause,
-  SkipBack,
-  SkipForward,
+  Captions,
   Heart,
-  Volume2,
-  VolumeX,
-  Shuffle,
+  MoreVertical,
+  Pause,
+  Play,
   Repeat,
   Repeat1,
+  Shuffle,
+  SkipBack,
+  SkipForward,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import ClayCover from "./ClayCover";
 import ClaySpinner from "./ClaySpinner";
@@ -16,7 +18,8 @@ import { formatTimeFromSec, finiteDuration } from "../lib/audio";
 import { coverPublicUrl } from "../lib/db";
 import { usePlayer, type RepeatMode } from "../context/PlayerContext";
 import { useTracks } from "../context/TrackContext";
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 export default function NowPlayingBar() {
   const {
@@ -35,6 +38,9 @@ export default function NowPlayingBar() {
     prev,
     toggleShuffle,
     cycleRepeat,
+    openLyrics,
+    closeLyrics,
+    lyricsOpen,
   } = usePlayer();
   const { toggleLike, tracks, ownerName } = useTracks();
   const [lastVolume, setLastVolume] = useState(0.8);
@@ -77,19 +83,6 @@ export default function NowPlayingBar() {
     </div>
   );
 
-  const likeBtn = (
-    <IconButton
-      label={liked ? "Unlike" : "Like"}
-      onClick={() => toggleLike(currentTrack.id)}
-    >
-      <Heart
-        size={16}
-        fill={liked ? "var(--clay-rose)" : "none"}
-        style={{ color: liked ? "var(--clay-rose)" : "var(--soft-ink)" }}
-      />
-    </IconButton>
-  );
-
   const playBtn = (
     <button
       onClick={togglePlay}
@@ -111,19 +104,19 @@ export default function NowPlayingBar() {
   return (
     <>
       <div
-        className="hidden md:grid fixed bottom-4 left-4 right-4 z-40 clay-float px-5 py-3.5 gap-x-6 gap-y-0 items-center"
+        data-player-bar
+        className="hidden md:grid fixed bottom-4 left-4 right-4 z-40 clay-float px-5 py-3.5 gap-x-6 gap-y-0 items-center overflow-visible"
         style={{
           background: "white",
-          gridTemplateColumns: "minmax(0,1fr) minmax(280px,1.6fr) minmax(0,1fr)",
+          gridTemplateColumns: "1fr auto 1fr",
         }}
       >
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center gap-3 min-w-0 justify-start">
           {cover}
           {meta}
-          {likeBtn}
         </div>
 
-        <div className="flex flex-col items-center gap-1.5 min-w-0">
+        <div className="flex flex-col items-center gap-1.5 w-[min(42vw,28rem)] min-w-[280px]">
           <div className="flex items-center gap-1">
             <ShuffleButton on={shuffle} onClick={toggleShuffle} />
             <IconButton label="Previous" onClick={prev}>
@@ -143,7 +136,24 @@ export default function NowPlayingBar() {
           />
         </div>
 
-        <div className="flex items-center justify-end gap-2 min-w-0">
+        <div className="flex items-center justify-end gap-1 min-w-0">
+          <IconButton
+            label={liked ? "Unlike" : "Like"}
+            onClick={() => toggleLike(currentTrack.id)}
+          >
+            <Heart
+              size={16}
+              fill={liked ? "var(--clay-rose)" : "none"}
+              style={{ color: liked ? "var(--clay-rose)" : "var(--soft-ink)" }}
+            />
+          </IconButton>
+          <IconButton
+            label="Lyrics"
+            onClick={lyricsOpen ? closeLyrics : openLyrics}
+            pressed={lyricsOpen}
+          >
+            <Captions size={16} style={{ color: "var(--ink)" }} />
+          </IconButton>
           <IconButton label={volume === 0 ? "Unmute" : "Mute"} onClick={toggleMute}>
             {volume === 0 ? (
               <VolumeX size={16} style={{ color: "var(--soft-ink)" }} />
@@ -175,6 +185,9 @@ export function MobileNowPlaying() {
     prev,
     toggleShuffle,
     cycleRepeat,
+    openLyrics,
+    closeLyrics,
+    lyricsOpen,
   } = usePlayer();
   const { toggleLike, tracks, ownerName } = useTracks();
 
@@ -223,16 +236,12 @@ export function MobileNowPlaying() {
             {ownerName(currentTrack.singerId)}
           </p>
         </div>
-        <IconButton
-          label={liked ? "Unlike" : "Like"}
-          onClick={() => toggleLike(currentTrack.id)}
-        >
-          <Heart
-            size={16}
-            fill={liked ? "var(--clay-rose)" : "none"}
-            style={{ color: liked ? "var(--clay-rose)" : "var(--soft-ink)" }}
-          />
-        </IconButton>
+        <PlayerMoreMenu
+          liked={liked}
+          lyricsOpen={lyricsOpen}
+          onFavorite={() => toggleLike(currentTrack.id)}
+          onLyrics={() => (lyricsOpen ? closeLyrics() : openLyrics())}
+        />
       </div>
 
       <div className="flex items-center px-2 pb-2 pt-0.5">
@@ -291,6 +300,145 @@ function RepeatButton({ mode, onClick }: { mode: RepeatMode; onClick: () => void
         <Repeat size={16} style={{ color: on ? "var(--ink)" : "var(--soft-ink)" }} />
       )}
     </IconButton>
+  );
+}
+
+function PlayerMoreMenu({
+  liked,
+  lyricsOpen,
+  onFavorite,
+  onLyrics,
+}: {
+  liked: boolean;
+  lyricsOpen: boolean;
+  onFavorite: () => void;
+  onLyrics: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ bottom: 0, right: 0 });
+  const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  function placeMenu() {
+    const el = rootRef.current;
+    const btn = el?.getBoundingClientRect();
+    if (!btn) return;
+    const bar = el?.closest("[data-player-bar]")?.getBoundingClientRect();
+    const top = bar?.top ?? btn.top;
+    setPos({
+      bottom: Math.max(12, window.innerHeight - top + 10),
+      right: Math.max(12, window.innerWidth - btn.right),
+    });
+  }
+
+  function toggle() {
+    placeMenu();
+    setOpen((value) => !value);
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointer(e: PointerEvent) {
+      const target = e.target as Node;
+      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    window.addEventListener("pointerdown", onPointer);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", placeMenu);
+    return () => {
+      window.removeEventListener("pointerdown", onPointer);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", placeMenu);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (lyricsOpen) setOpen(false);
+  }, [lyricsOpen]);
+
+  const menu = open
+    ? createPortal(
+        <div
+          ref={menuRef}
+          role="menu"
+          className="player-more-menu fixed z-[80] py-1.5 min-w-[12rem]"
+          style={{
+            bottom: pos.bottom,
+            right: pos.right,
+            background: "white",
+            borderRadius: 20,
+            boxShadow:
+              "8px 12px 28px rgba(58,47,69,0.18), inset -2px -2px 6px rgba(58,47,69,0.05), inset 3px 3px 6px rgba(255,255,255,0.85)",
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={onFavorite}
+            className="player-more-item w-full flex items-center gap-3 px-3.5 py-2.5 text-left"
+          >
+            <span
+              className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+              style={{ background: liked ? "var(--clay-rose)" : "var(--cream)" }}
+            >
+              <Heart
+                size={15}
+                fill={liked ? "white" : "none"}
+                style={{ color: liked ? "white" : "var(--ink)" }}
+              />
+            </span>
+            <span className="text-sm font-extrabold" style={{ color: "var(--ink)" }}>
+              {liked ? "Favorited" : "Favorite"}
+            </span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onLyrics();
+            }}
+            className="player-more-item w-full flex items-center gap-3 px-3.5 py-2.5 text-left"
+          >
+            <span
+              className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+              style={{ background: lyricsOpen ? "var(--clay-lilac)" : "var(--cream)" }}
+            >
+              <Captions size={15} style={{ color: "var(--ink)" }} />
+            </span>
+            <span className="text-sm font-extrabold" style={{ color: "var(--ink)" }}>
+              Lyrics
+            </span>
+          </button>
+        </div>,
+        document.body
+      )
+    : null;
+
+  return (
+    <div className="relative flex-shrink-0" ref={rootRef}>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-label={open ? "Close menu" : "More"}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+        style={{
+          background: open ? "var(--clay-lilac)" : "var(--cream)",
+          boxShadow: open
+            ? "inset 3px 3px 8px rgba(58,47,69,0.12), inset -2px -2px 4px rgba(255,255,255,0.5)"
+            : "4px 4px 10px rgba(58,47,69,0.08), inset -1px -1px 3px rgba(58,47,69,0.04), inset 2px 2px 4px rgba(255,255,255,0.7)",
+        }}
+      >
+        <MoreVertical size={18} style={{ color: "var(--ink)" }} />
+      </button>
+      {menu}
+    </div>
   );
 }
 

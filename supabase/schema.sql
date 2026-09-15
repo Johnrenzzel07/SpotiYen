@@ -21,13 +21,17 @@ create table if not exists public.tracks (
   singer_id uuid not null references public.profiles (id) on delete cascade,
   liked_by_listener boolean not null default false,
   is_sample boolean not null default false,
-  cover_url text not null default ''
+  cover_url text not null default '',
+  lyrics jsonb not null default '[]'::jsonb
 );
 
 create index if not exists tracks_created_at_idx on public.tracks (created_at desc);
 
 alter table public.tracks
   add column if not exists cover_url text not null default '';
+
+alter table public.tracks
+  add column if not exists lyrics jsonb not null default '[]'::jsonb;
 
 alter table public.profiles enable row level security;
 alter table public.tracks enable row level security;
@@ -132,6 +136,51 @@ create policy "admin delete tracks"
   on public.tracks for delete
   to authenticated
   using (public.is_admin());
+
+create or replace function public.admin_set_lyrics(track_id uuid, lines jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Only admin can edit lyrics';
+  end if;
+
+  update public.tracks
+  set lyrics = coalesce(lines, '[]'::jsonb)
+  where id = track_id;
+
+  if not found then
+    raise exception 'Song not found';
+  end if;
+end;
+$$;
+
+revoke all on function public.admin_set_lyrics(uuid, jsonb) from public;
+revoke all on function public.admin_set_lyrics(uuid, jsonb) from anon;
+grant execute on function public.admin_set_lyrics(uuid, jsonb) to authenticated;
+
+create or replace function public.guard_track_lyrics()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.lyrics is distinct from old.lyrics and not public.is_admin() then
+    new.lyrics := old.lyrics;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists tracks_guard_lyrics on public.tracks;
+create trigger tracks_guard_lyrics
+  before update on public.tracks
+  for each row
+  execute procedure public.guard_track_lyrics();
 
 create or replace function public.handle_new_user()
 returns trigger

@@ -19,6 +19,7 @@ import {
   deleteTrack as dbDeleteTrack,
   updateProfile as dbUpdateProfile,
   uploadTrackCover,
+  saveTrackLyrics,
 } from "../lib/db";
 import { prepareCoverBlob } from "../lib/image";
 import { useAuth } from "./AuthContext";
@@ -30,12 +31,13 @@ interface TrackCtx {
   refresh: () => Promise<void>;
   ownerName: (userId: string) => string;
   publish: (
-    track: Omit<Track, "id" | "createdAt" | "audioUrl" | "coverUrl">,
+    track: Omit<Track, "id" | "createdAt" | "audioUrl" | "coverUrl" | "lyrics">,
     audioBlob: Blob,
     filename?: string,
     coverFile?: File | null
   ) => Promise<Track>;
   toggleLike: (id: string) => Promise<void>;
+  saveLyrics: (id: string, lines: Track["lyrics"]) => Promise<void>;
   deleteTrack: (id: string) => Promise<void>;
   updateProfile: (id: string, data: Partial<Pick<User, "name" | "role">>) => Promise<void>;
   newTrackToast: Track | null;
@@ -112,7 +114,7 @@ export function TrackProvider({ children }: { children: ReactNode }) {
 
   const publish = useCallback(
     async (
-      data: Omit<Track, "id" | "createdAt" | "audioUrl" | "coverUrl">,
+      data: Omit<Track, "id" | "createdAt" | "audioUrl" | "coverUrl" | "lyrics">,
       audioBlob: Blob,
       filename?: string,
       coverFile?: File | null
@@ -172,6 +174,19 @@ export function TrackProvider({ children }: { children: ReactNode }) {
     setTracks((prev) => prev.filter((t) => t.id !== id));
   }, [tracks, user]);
 
+  const saveLyrics = useCallback(
+    async (id: string, lines: Track["lyrics"]) => {
+      if (user?.role !== "admin") {
+        throw new Error("Only the admin account can edit lyrics.");
+      }
+      await saveTrackLyrics(id, lines);
+      setTracks((prev) =>
+        prev.map((track) => (track.id === id ? { ...track, lyrics: lines } : track))
+      );
+    },
+    [user]
+  );
+
   const updateProfile = useCallback(
     async (id: string, data: Partial<Pick<User, "name" | "role">>) => {
       if (user?.role !== "admin") {
@@ -204,6 +219,7 @@ export function TrackProvider({ children }: { children: ReactNode }) {
         ownerName,
         publish,
         toggleLike,
+        saveLyrics,
         deleteTrack,
         updateProfile,
         newTrackToast,

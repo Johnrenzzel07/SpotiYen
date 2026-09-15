@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { ArrowLeft, Heart, Play, Pause, Trash2 } from "lucide-react";
+import { ArrowLeft, Captions, Heart, PenLine, Play, Pause, Trash2 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useTracks } from "../context/TrackContext";
 import { usePlayer } from "../context/PlayerContext";
@@ -15,7 +15,7 @@ export default function TrackDetail() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { tracks, loading, toggleLike, ownerName, deleteTrack } = useTracks();
-  const { play, currentTrack, isPlaying, isBuffering, togglePlay, setQueue, stop } = usePlayer();
+  const { play, currentTrack, isPlaying, isBuffering, togglePlay, stop, openLyrics } = usePlayer();
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -51,9 +51,14 @@ export default function TrackDetail() {
     if (isActive) {
       togglePlay();
     } else {
-      setQueue(tracks);
-      play(track);
+      play(track, tracks);
     }
+  }
+
+  function handleLyrics() {
+    if (!track) return;
+    if (!isActive) play(track, tracks);
+    openLyrics();
   }
 
   return (
@@ -169,6 +174,31 @@ export default function TrackDetail() {
             </button>
           )}
         </div>
+        {(track.lyrics.length > 0 || user?.role === "admin") && (
+          <div className="flex items-center gap-3">
+            {track.lyrics.length > 0 && (
+              <button
+                type="button"
+                onClick={handleLyrics}
+                className="clay-btn px-5 py-3 text-sm font-extrabold inline-flex items-center gap-2"
+                style={{ background: "var(--clay-lilac)", color: "var(--ink)" }}
+              >
+                <Captions size={16} />
+                Karaoke
+              </button>
+            )}
+            {user?.role === "admin" && (
+              <Link
+                to={`/track/${track.id}/lyrics`}
+                className="clay-btn px-5 py-3 text-sm font-extrabold inline-flex items-center gap-2"
+                style={{ background: "white", color: "var(--ink)" }}
+              >
+                <PenLine size={16} />
+                {track.lyrics.length > 0 ? "Edit lyrics" : "Add lyrics"}
+              </Link>
+            )}
+          </div>
+        )}
         {error && (
           <p className="text-xs font-semibold" style={{ color: "var(--record-red)" }}>
             {error}

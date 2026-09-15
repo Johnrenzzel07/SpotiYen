@@ -11,6 +11,7 @@ import Upload from "./pages/Upload";
 import Collections from "./pages/Collections";
 import CollectionDetail from "./pages/CollectionDetail";
 import Users from "./pages/Users";
+import LyricsEditor from "./pages/LyricsEditor";
 import { CollectionProvider } from "./context/CollectionContext";
 import { LoadingScreen } from "./components/ClaySpinner";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -62,6 +63,7 @@ function AppRoutes() {
         <Route path="/collections" element={<Collections />} />
         <Route path="/collection/:id" element={<CollectionDetail />} />
         <Route path="/track/:id" element={<TrackDetail />} />
+        <Route path="/track/:id/lyrics" element={<LyricsEditor />} />
         <Route path="/users" element={<Users />} />
       </Route>
       <Route path="*" element={<Navigate to="/login" replace />} />

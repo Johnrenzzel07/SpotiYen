@@ -4,6 +4,11 @@ export type Mood = "Late night" | "For you" | "Warm-up" | "Full send";
 
 export type TrackSource = "recording" | "upload";
 
+export interface LyricLine {
+  t: number;
+  text: string;
+}
+
 export type CollectionKind = "album" | "playlist";
 
 export interface User {
@@ -28,6 +33,7 @@ export interface Track {
   isSample?: boolean;
   source?: TrackSource;
   coverUrl: string;
+  lyrics: LyricLine[];
 }
 
 export interface Collection {

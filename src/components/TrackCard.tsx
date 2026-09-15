@@ -16,7 +16,7 @@ interface Props {
 }
 
 export default function TrackCard({ track, index = 0, queue, onRemove, onDelete }: Props) {
-  const { play, currentTrack, isPlaying, isBuffering, togglePlay, setQueue } = usePlayer();
+  const { play, currentTrack, isPlaying, isBuffering, togglePlay } = usePlayer();
   const { tracks, toggleLike, ownerName } = useTracks();
   const isActive = currentTrack?.id === track.id;
   const waiting = isActive && isBuffering;
@@ -26,8 +26,7 @@ export default function TrackCard({ track, index = 0, queue, onRemove, onDelete 
     if (isActive) {
       togglePlay();
     } else {
-      setQueue(queue ?? tracks);
-      play(track);
+      play(track, queue ?? tracks);
     }
   }
 

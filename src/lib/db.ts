@@ -1,12 +1,14 @@
 import type {
   Collection,
   CollectionKind,
+  LyricLine,
   Mood,
   Track,
   TrackSource,
   User,
   UserRole,
 } from "../types";
+import { parseLyrics } from "./lyrics";
 import { COVERS_BUCKET, RECORDINGS_BUCKET, supabase } from "./supabase";
 
 type ProfileRow = {
@@ -30,6 +32,7 @@ type TrackRow = {
   is_sample: boolean;
   source?: TrackSource;
   cover_url?: string | null;
+  lyrics?: unknown;
 };
 
 type CollectionRow = {
@@ -80,6 +83,7 @@ function mapTrack(row: TrackRow): Track {
     isSample: row.is_sample,
     source: row.source === "upload" ? "upload" : "recording",
     coverUrl: row.cover_url ?? "",
+    lyrics: parseLyrics(row.lyrics),
   };
 }
 
@@ -206,6 +210,30 @@ export async function updateTrack(
   }
 
   const { error } = await supabase.from("tracks").update(patch).eq("id", id);
+  throwIfError(error);
+}
+
+export async function saveTrackLyrics(id: string, lines: LyricLine[]): Promise<void> {
+  const payload = lines
+    .map((line) => ({
+      t: Number.isFinite(line.t) && line.t > 0 ? Number(line.t.toFixed(2)) : 0,
+      text: line.text.trim(),
+    }))
+    .filter((line) => line.text.length > 0);
+
+  const { error } = await supabase.rpc("admin_set_lyrics", {
+    track_id: id,
+    lines: payload,
+  });
+
+  if (error && /could not find|schema cache|does not exist|function/i.test(error.message)) {
+    throw new Error(
+      "Lyrics need one SQL step. In Supabase open SQL Editor, paste supabase/migrate-lyrics.sql, click Run, then try again."
+    );
+  }
+  if (error && /only admin/i.test(error.message)) {
+    throw new Error("Only the admin account can edit lyrics.");
+  }
   throwIfError(error);
 }
 

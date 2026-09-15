@@ -7,7 +7,8 @@ export default function MobileDock() {
 
   return (
     <div
-      className="md:hidden fixed inset-x-0 bottom-0 z-50"
+      data-player-bar
+      className="md:hidden fixed inset-x-0 bottom-0 z-50 overflow-visible"
       style={{
         background: "white",
         borderRadius: "28px 28px 0 0",

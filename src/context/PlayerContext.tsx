@@ -19,12 +19,8 @@ function shuffleIds(ids: string[], currentId?: string) {
     const j = Math.floor(Math.random() * (i + 1));
     [rest[i], rest[j]] = [rest[j], rest[i]];
   }
-  return currentId && ids.includes(currentId) ? [currentId, ...rest] : rest;
-}
-
-function playOrder(tracks: Track[], currentId: string | undefined, shuffled: boolean) {
-  const ids = tracks.map((t) => t.id);
-  return shuffled ? shuffleIds(ids, currentId) : ids;
+  if (currentId && ids.includes(currentId)) return [currentId, ...rest];
+  return rest;
 }
 
 interface PlayerCtx {
@@ -36,7 +32,7 @@ interface PlayerCtx {
   volume: number;
   shuffle: boolean;
   repeat: RepeatMode;
-  play: (track: Track) => void;
+  play: (track: Track, queue?: Track[]) => void;
   togglePlay: () => void;
   pause: () => void;
   resume: () => void;
@@ -49,6 +45,9 @@ interface PlayerCtx {
   cycleRepeat: () => void;
   queue: Track[];
   setQueue: (tracks: Track[]) => void;
+  lyricsOpen: boolean;
+  openLyrics: () => void;
+  closeLyrics: () => void;
 }
 
 const PlayerContext = createContext<PlayerCtx | null>(null);
@@ -64,23 +63,49 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [queue, setQueueState] = useState<Track[]>([]);
   const [shuffle, setShuffle] = useState(false);
   const [repeat, setRepeat] = useState<RepeatMode>("off");
+  const [lyricsOpen, setLyricsOpen] = useState(false);
+
   const objectUrlRef = useRef<string | null>(null);
   const trackRef = useRef<Track | null>(null);
   const queueRef = useRef<Track[]>([]);
   const orderRef = useRef<string[]>([]);
   const shuffleRef = useRef(false);
   const repeatRef = useRef<RepeatMode>("off");
+  const volumeRef = useRef(0.8);
+  const playGenRef = useRef(0);
   const playTrackRef = useRef<(track: Track) => Promise<void>>(async () => {});
-  const goNextRef = useRef<() => void>(() => {});
+  const goNextRef = useRef<(forceWrap?: boolean) => void>(() => {});
 
   queueRef.current = queue;
   shuffleRef.current = shuffle;
   repeatRef.current = repeat;
+  volumeRef.current = volume;
+
+  function applyQueue(tracks: Track[]) {
+    queueRef.current = tracks;
+    setQueueState(tracks);
+  }
+
+  function rebuildOrder(currentId?: string) {
+    const ids = queueRef.current.map((t) => t.id);
+    const anchor = currentId ?? trackRef.current?.id;
+    orderRef.current = shuffleRef.current ? shuffleIds(ids, anchor) : ids;
+  }
+
+  function trackById(id: string | undefined) {
+    if (!id) return undefined;
+    return queueRef.current.find((t) => t.id === id);
+  }
+
+  function shouldWrap() {
+    return shuffleRef.current || repeatRef.current === "all";
+  }
 
   useEffect(() => {
     if (!audioRef.current) {
       audioRef.current = new Audio();
-      audioRef.current.volume = 0.8;
+      audioRef.current.volume = volumeRef.current;
+      audioRef.current.preload = "auto";
     }
     const audio = audioRef.current;
 
@@ -97,11 +122,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const onEnd = () => {
       setIsBuffering(false);
       if (repeatRef.current === "one") {
-        audio.currentTime = 0;
-        void audio.play().catch(() => setIsPlaying(false));
-        return;
+        const current = trackRef.current;
+        if (current) {
+          void playTrackRef.current(current);
+          return;
+        }
       }
-      goNextRef.current();
+      goNextRef.current(true);
     };
     const onWaiting = () => setIsBuffering(true);
     const onPlaying = () => {
@@ -109,6 +136,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setIsBuffering(false);
     };
     const onPause = () => setIsPlaying(false);
+    const onError = () => {
+      setIsBuffering(false);
+      setIsPlaying(false);
+    };
 
     audio.addEventListener("timeupdate", onTime);
     audio.addEventListener("loadedmetadata", onDur);
@@ -117,6 +148,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     audio.addEventListener("stalled", onWaiting);
     audio.addEventListener("playing", onPlaying);
     audio.addEventListener("pause", onPause);
+    audio.addEventListener("error", onError);
 
     return () => {
       audio.removeEventListener("timeupdate", onTime);
@@ -126,145 +158,193 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       audio.removeEventListener("stalled", onWaiting);
       audio.removeEventListener("playing", onPlaying);
       audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("error", onError);
     };
   }, []);
 
-  const playTrack = useCallback(
-    async (track: Track) => {
-      const audio = audioRef.current!;
-      trackRef.current = track;
-      setCurrentTrack(track);
-      setCurrentTime(0);
-      setDuration(finiteDuration(0, track.durationMs));
-      setIsBuffering(true);
-      setIsPlaying(false);
+  const playTrack = useCallback(async (track: Track) => {
+    const audio = audioRef.current;
+    if (!audio) return;
 
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = null;
+    const gen = ++playGenRef.current;
+    trackRef.current = track;
+    setCurrentTrack(track);
+    setCurrentTime(0);
+    setDuration(finiteDuration(0, track.durationMs));
+    setIsBuffering(true);
+    setIsPlaying(false);
+
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+
+    try {
+      const src = await getPlayableUrl(track);
+      if (playGenRef.current !== gen || trackRef.current?.id !== track.id) return;
+      if (!src) {
+        setIsBuffering(false);
+        setIsPlaying(false);
+        return;
       }
 
-      try {
-        const src = await getPlayableUrl(track);
-        if (trackRef.current?.id !== track.id) return;
-        if (!src) {
-          setIsBuffering(false);
-          setIsPlaying(false);
-          return;
-        }
-        if (!orderRef.current.includes(track.id)) {
-          orderRef.current = playOrder(
-            queueRef.current.some((t) => t.id === track.id)
-              ? queueRef.current
-              : [...queueRef.current, track],
-            track.id,
-            shuffleRef.current
-          );
-        }
-        audio.src = src;
-        audio.volume = volume;
-        await audio.play();
-      } catch {
-        if (trackRef.current?.id === track.id) {
-          setIsBuffering(false);
-          setIsPlaying(false);
-        }
+      audio.pause();
+      audio.src = src;
+      audio.volume = volumeRef.current;
+      audio.currentTime = 0;
+      await audio.play();
+    } catch {
+      if (playGenRef.current === gen && trackRef.current?.id === track.id) {
+        setIsBuffering(false);
+        setIsPlaying(false);
       }
-    },
-    [volume]
-  );
+    }
+  }, []);
 
   playTrackRef.current = playTrack;
 
+  const play = useCallback(
+    (track: Track, nextQueue?: Track[]) => {
+      const incoming = nextQueue && nextQueue.length > 0 ? nextQueue : queueRef.current;
+      const withTrack = incoming.some((t) => t.id === track.id) ? incoming : [...incoming, track];
+      applyQueue(withTrack);
+      rebuildOrder(track.id);
+      void playTrack(track);
+    },
+    [playTrack]
+  );
+
   const setQueue = useCallback((tracks: Track[]) => {
-    setQueueState(tracks);
-    queueRef.current = tracks;
-    orderRef.current = playOrder(tracks, trackRef.current?.id, shuffleRef.current);
+    applyQueue(tracks);
+    rebuildOrder(trackRef.current?.id);
   }, []);
 
-  const findInQueue = (id: string | undefined) =>
-    queueRef.current.find((t) => t.id === id);
-
-  const goNext = useCallback(() => {
-    const q = queueRef.current;
-    let order = orderRef.current;
-    const currentId = trackRef.current?.id;
-    if (!currentId || q.length === 0) return;
-    if (!order.includes(currentId)) {
-      order = playOrder(q, currentId, shuffleRef.current);
-      orderRef.current = order;
-    }
-    const idx = order.indexOf(currentId);
-    let nextId: string | undefined;
-    if (idx >= 0 && idx < order.length - 1) {
-      nextId = order[idx + 1];
-    } else if (repeatRef.current === "all" && order.length > 0) {
-      if (shuffleRef.current) {
-        order = shuffleIds(
-          q.map((t) => t.id),
-          currentId
-        );
-        orderRef.current = order;
-        nextId = order.find((id) => id !== currentId) ?? order[0];
-      } else {
-        nextId = order[0];
+  const goNext = useCallback(
+    (fromEnded = false) => {
+      const q = queueRef.current;
+      const currentId = trackRef.current?.id;
+      if (!currentId || q.length === 0) {
+        if (fromEnded) setIsPlaying(false);
+        return;
       }
-    }
-    const nextTrack = findInQueue(nextId);
-    if (nextTrack) void playTrackRef.current(nextTrack);
-    else setIsPlaying(false);
-  }, []);
+
+      const ids = q.map((t) => t.id);
+      const orderValid =
+        orderRef.current.length === ids.length &&
+        orderRef.current.includes(currentId) &&
+        orderRef.current.every((id) => ids.includes(id));
+      if (!orderValid) rebuildOrder(currentId);
+
+      let order = orderRef.current;
+      const idx = order.indexOf(currentId);
+      const wrap = shouldWrap();
+
+      if (idx >= 0 && idx < order.length - 1) {
+        const nextTrack = trackById(order[idx + 1]);
+        if (nextTrack) {
+          void playTrackRef.current(nextTrack);
+          return;
+        }
+      }
+
+      if (!wrap) {
+        if (fromEnded) setIsPlaying(false);
+        return;
+      }
+
+      if (shuffleRef.current && q.length > 1) {
+        rebuildOrder(currentId);
+        order = orderRef.current;
+        const nextTrack = trackById(order[1] ?? order[0]);
+        if (nextTrack) void playTrackRef.current(nextTrack);
+        return;
+      }
+
+      const nextTrack = trackById(order[0] ?? currentId);
+      if (nextTrack) void playTrackRef.current(nextTrack);
+    },
+    []
+  );
 
   goNextRef.current = goNext;
 
-  const next = goNext;
+  const next = useCallback(() => goNext(false), [goNext]);
 
   const prev = useCallback(() => {
-    if (!currentTrack) return;
     const audio = audioRef.current;
     if (audio && audio.currentTime > 3) {
       audio.currentTime = 0;
+      setCurrentTime(0);
       return;
     }
+
+    const currentId = trackRef.current?.id;
+    const q = queueRef.current;
+    if (!currentId || q.length === 0) return;
+
+    const ids = q.map((t) => t.id);
+    if (!orderRef.current.includes(currentId) || orderRef.current.length !== ids.length) {
+      rebuildOrder(currentId);
+    }
+
     const order = orderRef.current;
-    const idx = order.indexOf(currentTrack.id);
+    const idx = order.indexOf(currentId);
     if (idx > 0) {
-      const prevTrack = findInQueue(order[idx - 1]);
+      const prevTrack = trackById(order[idx - 1]);
+      if (prevTrack) void playTrack(prevTrack);
+      return;
+    }
+
+    if (shouldWrap()) {
+      const prevTrack = trackById(order[order.length - 1]);
       if (prevTrack) void playTrack(prevTrack);
     }
-  }, [currentTrack, playTrack]);
+  }, [playTrack]);
 
   const toggleShuffle = useCallback(() => {
     const nextOn = !shuffleRef.current;
     shuffleRef.current = nextOn;
     setShuffle(nextOn);
-    orderRef.current = playOrder(queueRef.current, trackRef.current?.id, nextOn);
+    rebuildOrder(trackRef.current?.id);
   }, []);
 
   const cycleRepeat = useCallback(() => {
-    setRepeat((mode) => {
-      const nextMode: RepeatMode = mode === "off" ? "all" : mode === "all" ? "one" : "off";
-      repeatRef.current = nextMode;
-      return nextMode;
-    });
+    const nextMode: RepeatMode =
+      repeatRef.current === "off" ? "all" : repeatRef.current === "all" ? "one" : "off";
+    repeatRef.current = nextMode;
+    setRepeat(nextMode);
   }, []);
 
   const togglePlay = useCallback(() => {
     const audio = audioRef.current;
-    if (!audio || !currentTrack) return;
+    const track = trackRef.current;
+    if (!audio || !track) return;
+
+    if (audio.ended || (!audio.src && track)) {
+      void playTrack(track);
+      return;
+    }
+
     if (audio.paused) {
       setIsBuffering(true);
-      audio.play().catch(() => setIsBuffering(false));
+      audio.play().catch(() => {
+        void playTrack(track);
+      });
     } else {
       audio.pause();
     }
-  }, [currentTrack]);
+  }, [playTrack]);
 
   const pause = useCallback(() => audioRef.current?.pause(), []);
   const resume = useCallback(() => {
+    const audio = audioRef.current;
+    const track = trackRef.current;
+    if (!audio || !track) return;
     setIsBuffering(true);
-    audioRef.current?.play().catch(() => setIsBuffering(false));
-  }, []);
+    audio.play().catch(() => {
+      void playTrack(track);
+    });
+  }, [playTrack]);
 
   const seek = useCallback((time: number) => {
     if (audioRef.current) {
@@ -274,11 +354,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setVolume = useCallback((v: number) => {
+    volumeRef.current = v;
     setVolumeState(v);
     if (audioRef.current) audioRef.current.volume = v;
   }, []);
 
+  const openLyrics = useCallback(() => setLyricsOpen(true), []);
+  const closeLyrics = useCallback(() => setLyricsOpen(false), []);
+
   const stop = useCallback(() => {
+    playGenRef.current += 1;
     const audio = audioRef.current;
     if (audio) {
       audio.pause();
@@ -286,12 +371,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       audio.load();
     }
     trackRef.current = null;
+    orderRef.current = [];
+    applyQueue([]);
     setCurrentTrack(null);
     setIsPlaying(false);
     setIsBuffering(false);
     setCurrentTime(0);
     setDuration(0);
-    setQueue([]);
+    setLyricsOpen(false);
   }, []);
 
   useEffect(() => {
@@ -299,7 +386,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (
         e.code === "Space" &&
         !(e.target instanceof HTMLInputElement) &&
-        !(e.target instanceof HTMLTextAreaElement)
+        !(e.target instanceof HTMLTextAreaElement) &&
+        !(e.target instanceof HTMLSelectElement) &&
+        !(e.target instanceof HTMLButtonElement)
       ) {
         e.preventDefault();
         togglePlay();
@@ -320,7 +409,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         volume,
         shuffle,
         repeat,
-        play: playTrack,
+        play,
         togglePlay,
         pause,
         resume,
@@ -333,6 +422,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         cycleRepeat,
         queue,
         setQueue,
+        lyricsOpen,
+        openLyrics,
+        closeLyrics,
       }}
     >
       {children}

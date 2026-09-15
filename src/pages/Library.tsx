@@ -21,7 +21,7 @@ export default function Library() {
   const { user } = useAuth();
   const { tracks, loading } = useTracks();
   const { collections } = useCollections();
-  const { setQueue, play } = usePlayer();
+  const { play } = usePlayer();
 
   const liked = useMemo(() => tracks.filter((t) => t.likedByListener), [tracks]);
   const recent = useMemo(
@@ -31,8 +31,7 @@ export default function Library() {
 
   function playAll(list: typeof tracks) {
     if (list.length === 0) return;
-    setQueue(list);
-    play(list[0]);
+    play(list[0], list);
   }
 
   if (loading) {
@@ -308,7 +307,7 @@ function RecentCard({
   track: import("../types").Track;
   index: number;
 }) {
-  const { play: playTrack, currentTrack, isPlaying, isBuffering, togglePlay, setQueue } = usePlayer();
+  const { play: playTrack, currentTrack, isPlaying, isBuffering, togglePlay } = usePlayer();
   const { tracks, ownerName } = useTracks();
   const isActive = currentTrack?.id === track.id;
   const waiting = isActive && isBuffering;
@@ -317,8 +316,7 @@ function RecentCard({
     if (isActive) {
       togglePlay();
     } else {
-      setQueue(tracks);
-      playTrack(track);
+      playTrack(track, tracks);
     }
   }
 

@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import Sidebar from "./Sidebar";
 import MobileDock from "./MobileDock";
 import NowPlayingBar from "./NowPlayingBar";
+import LyricsKaraoke from "./LyricsKaraoke";
 import MobileHeader from "./MobileHeader";
 import Toast from "./Toast";
 import { useTracks } from "../context/TrackContext";
@@ -11,7 +12,7 @@ import { usePlayer } from "../context/PlayerContext";
 export default function Layout() {
   const location = useLocation();
   const { newTrackToast, dismissToast, tracks, loading } = useTracks();
-  const { play, setQueue, currentTrack, stop } = usePlayer();
+  const { play, currentTrack, stop } = usePlayer();
   const hasPlayer = Boolean(currentTrack);
 
   useEffect(() => {
@@ -41,13 +42,13 @@ export default function Layout() {
 
       <NowPlayingBar />
       <MobileDock />
+      <LyricsKaraoke />
 
       {newTrackToast && (
         <Toast
           track={newTrackToast}
           onPlay={() => {
-            setQueue(tracks);
-            play(newTrackToast);
+            play(newTrackToast, tracks);
             dismissToast();
           }}
           onDismiss={dismissToast}
