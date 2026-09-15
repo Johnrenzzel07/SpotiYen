@@ -1,8 +1,10 @@
 type LrcLine = { t: number; text: string };
 
 type LrcRecord = {
+  id?: number;
   trackName?: string;
   artistName?: string;
+  albumName?: string;
   duration?: number;
   syncedLyrics?: string | null;
 };
@@ -11,6 +13,8 @@ export type LookupHit = {
   times: number[];
   source: string;
   matched: number;
+  label: string;
+  durationSec: number;
 };
 
 const UA = "SpotiYen/1.0 (private karaoke timing)";
@@ -40,6 +44,52 @@ function norm(value: string) {
     .replace(/[^\p{L}\p{N}\s]/gu, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function editDistance(a: string, b: string) {
+  if (a === b) return 0;
+  const rows: number[][] = Array.from({ length: a.length + 1 }, (_, i) => {
+    const row = Array(b.length + 1).fill(0);
+    row[0] = i;
+    return row;
+  });
+  for (let j = 1; j <= b.length; j++) rows[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      rows[i][j] = Math.min(
+        rows[i - 1][j] + 1,
+        rows[i][j - 1] + 1,
+        rows[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+    }
+  }
+  return rows[a.length][b.length];
+}
+
+function artistSimilar(published: string, wanted: string) {
+  const score = similar(published, wanted);
+  if (score >= 0.62) return score;
+  const left = norm(published);
+  const right = norm(wanted);
+  if (!left || !right) return score;
+  if (left.length >= 8 && right.length >= 8 && editDistance(left, right) <= 2) return 0.9;
+  const stop = new Set(["the", "a", "an", "and", "of", "feat", "ft"]);
+  const wa = [...new Set(left.split(" ").filter((word) => word && !stop.has(word) && word.length > 2))];
+  const wb = [...new Set(right.split(" ").filter((word) => word && !stop.has(word) && word.length > 2))];
+  if (wa.length === 0 || wb.length === 0) return score;
+  let inter = 0;
+  for (const word of wa) {
+    if (
+      wb.some(
+        (other) =>
+          word === other ||
+          (Math.min(word.length, other.length) >= 5 && editDistance(word, other) <= 1)
+      )
+    ) {
+      inter += 1;
+    }
+  }
+  return Math.max(score, (2 * inter) / (wa.length + wb.length));
 }
 
 function wordCount(value: string) {
@@ -258,16 +308,21 @@ function durationClose(rowDuration: number | undefined, durationSec: number) {
   return abs <= Math.max(8, durationSec * 0.06);
 }
 
-function recordScore(row: LrcRecord, artist: string, track: string, durationSec: number) {
+function recordScore(row: LrcRecord, artist: string, track: string, durationSec: number, strictDuration: boolean) {
   if (!row.syncedLyrics) return -1;
-  if (!durationClose(row.duration, durationSec)) return -1;
+  if (strictDuration && !durationClose(row.duration, durationSec)) return -1;
   const durationScore =
     typeof row.duration === "number"
       ? Math.max(0, 1 - Math.abs(row.duration - durationSec) / Math.max(durationSec, 1))
       : 0.2;
-  const names = [artist, ...artistParts(artist)];
-  const artistScore = Math.max(0, ...names.map((name) => similar(row.artistName || "", name)));
-  return similar(row.trackName || "", track) * 4 + artistScore * 2 + durationScore * 6;
+  const names = [artist, ...artistParts(artist)].filter(Boolean);
+  const artistScore = names.length
+    ? Math.max(0, ...names.map((name) => artistSimilar(row.artistName || "", name)))
+    : 0;
+  const trackScore = Math.max(similar(row.trackName || "", track), similar(row.trackName || "", `${artist} ${track}`));
+  if (artist && artistScore < 0.55) return -1;
+  if (trackScore < 0.28 && artistScore < 0.4) return -1;
+  return trackScore * 4 + artistScore * 2 + durationScore * 3;
 }
 
 async function lrclibSearch(params: Record<string, string>) {
@@ -305,35 +360,53 @@ function stampFromRecord(best: LrcRecord, userLines: string[], durationSec: numb
   const aligned = alignDp(userLines, exploded);
   const hits = aligned.filter((t) => t != null).length;
   const used = hits >= Math.max(3, Math.floor(userLines.length * 0.35)) ? aligned : alignInOrder(userLines, exploded);
-
-  const ratio =
-    typeof best.duration === "number" && best.duration > 20 ? durationSec / best.duration : 1;
-  const scale = ratio > 0.92 && ratio < 1.08 ? ratio : 1;
-  const scaled = used.map((t) => (t == null ? null : t * scale));
-  const lastPublished = (exploded[exploded.length - 1]?.t ?? durationSec) * scale;
+  const lastPublished = exploded[exploded.length - 1]?.t ?? durationSec;
+  const duration = typeof best.duration === "number" && best.duration > 20 ? best.duration : durationSec;
+  const album = (best.albumName || "").trim();
+  const albumLabel = /[\p{L}]{3,}/u.test(album) ? album : "";
+  const artist = best.artistName || "unknown";
+  const name = best.trackName || track;
+  const clock = formatClock(duration);
 
   return {
-    times: fillHoles(scaled, durationSec, lastPublished),
-    source: `lrclib:${best.artistName || "unknown"} – ${best.trackName || track}`,
-    matched: scaled.filter((t) => t != null).length,
+    times: fillHoles(used, durationSec, lastPublished),
+    source: `lrclib:${artist} – ${name}`,
+    matched: used.filter((t) => t != null).length,
+    label: albumLabel
+      ? `${name} · ${artist} · ${clock} · ${albumLabel}`
+      : `${name} · ${artist} · ${clock}`,
+    durationSec: duration,
   };
 }
 
-export async function lookupPublishedTimes(
-  title: string,
-  durationSec: number,
-  userLines: string[]
-): Promise<LookupHit | null> {
+function lrcFingerprint(row: LrcRecord) {
+  const lines = usableLrc(parseLrc(row.syncedLyrics || ""));
+  if (lines.length < 2) return "";
+  const start = Math.round(lines[0].t);
+  const mid = Math.round(lines[Math.floor(lines.length / 2)].t);
+  const end = Math.round(lines[lines.length - 1].t);
+  return `${lines.length}|${start}|${mid}|${end}`;
+}
+
+function durationBucket(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 20) return -1;
+  return Math.round(seconds / 10);
+}
+
+function formatClock(seconds: number) {
+  const total = Math.max(0, Math.round(seconds));
+  return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, "0")}`;
+}
+
+async function collectRecords(title: string, durationSec: number) {
   const { artist, track } = parseTitle(title);
   const artists = [artist, ...artistParts(artist)].filter(Boolean);
+  const found = new Map<string, LrcRecord>();
 
   for (const name of artists) {
     try {
       const exact = await lrclibExact(name, track, durationSec);
-      if (exact && recordScore(exact, artist, track, durationSec) > 0) {
-        const hit = stampFromRecord(exact, userLines, durationSec, track);
-        if (hit) return hit;
-      }
+      if (exact?.syncedLyrics) found.set(lrcFingerprint(exact) || `exact-${name}`, exact);
     } catch {
       /* try search */
     }
@@ -345,25 +418,69 @@ export async function lookupPublishedTimes(
   queries.push({ q: title });
   if (track !== title) queries.push({ q: track });
 
-  let best: LrcRecord | null = null;
-  let bestScore = 0.8;
   for (const query of queries) {
     try {
       const rows = await lrclibSearch(query);
       for (const row of rows) {
-        const score = recordScore(row, artist, track, durationSec);
-        if (score > bestScore) {
-          best = row;
-          bestScore = score;
-        }
+        if (!row.syncedLyrics) continue;
+        const key = lrcFingerprint(row);
+        if (!key || found.has(key)) continue;
+        found.set(key, row);
       }
     } catch {
       /* try the next query */
     }
   }
 
-  if (!best?.syncedLyrics) return null;
-  return stampFromRecord(best, userLines, durationSec, track);
+  return { artist, track, records: [...found.values()] };
+}
+
+export async function lookupPublishedTemplates(
+  title: string,
+  durationSec: number,
+  userLines: string[]
+): Promise<LookupHit[]> {
+  const { artist, track, records } = await collectRecords(title, durationSec);
+  const ranked = records
+    .map((row) => ({ row, score: recordScore(row, artist, track, durationSec, false) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  const unique: LookupHit[] = [];
+  const seen = new Set<string>();
+  for (const item of ranked) {
+    const fingerprint = lrcFingerprint(item.row);
+    if (!fingerprint || seen.has(fingerprint)) continue;
+    const hit = stampFromRecord(item.row, userLines, durationSec, track);
+    if (!hit) continue;
+    seen.add(fingerprint);
+    unique.push(hit);
+  }
+
+  const templates: LookupHit[] = [];
+  const usedBuckets = new Set<number>();
+  for (const hit of unique) {
+    const bucket = durationBucket(hit.durationSec);
+    if (bucket >= 0 && usedBuckets.has(bucket)) continue;
+    if (bucket >= 0) usedBuckets.add(bucket);
+    templates.push(hit);
+    if (templates.length >= 3) return templates;
+  }
+  for (const hit of unique) {
+    if (templates.includes(hit)) continue;
+    templates.push(hit);
+    if (templates.length >= 3) break;
+  }
+  return templates;
+}
+
+export async function lookupPublishedTimes(
+  title: string,
+  durationSec: number,
+  userLines: string[]
+): Promise<LookupHit | null> {
+  const templates = await lookupPublishedTemplates(title, durationSec, userLines);
+  return templates[0] ?? null;
 }
 
 export async function groqWebTimes(
@@ -474,5 +591,7 @@ async function groqWebOnce(
     times: fillHoles(aligned, durationSec),
     source: typeof parsed.source === "string" ? parsed.source : "web",
     matched,
+    label: "Web karaoke times",
+    durationSec,
   };
 }

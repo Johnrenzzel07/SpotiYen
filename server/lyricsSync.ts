@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { groqWebTimes, lookupPublishedTimes } from "./lrcLookup.ts";
+import { groqWebTimes, lookupPublishedTemplates } from "./lrcLookup.ts";
 
 type SyncInput = {
   title: string;
@@ -91,13 +91,9 @@ export async function handleLyricsSync(request: Request): Promise<Response> {
     }
 
     try {
-      const published = await lookupPublishedTimes(title, durationSec, lines);
-      if (published) {
-        return json(200, {
-          times: published.times,
-          source: published.source,
-          matched: published.matched,
-        });
+      const templates = await lookupPublishedTemplates(title, durationSec, lines);
+      if (templates.length > 0) {
+        return json(200, { templates });
       }
     } catch {
       /* fall through to Groq web search */
@@ -108,9 +104,7 @@ export async function handleLyricsSync(request: Request): Promise<Response> {
         const web = await groqWebTimes(groqKey(), title, durationSec, lines);
         if (web) {
           return json(200, {
-            times: web.times,
-            source: web.source,
-            matched: web.matched,
+            templates: [web],
           });
         }
       } catch (err) {

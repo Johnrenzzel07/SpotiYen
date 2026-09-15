@@ -20,7 +20,7 @@ import ClaySpinner, { ButtonDots, LibrarySkeleton } from "../components/ClaySpin
 import { coverPublicUrl } from "../lib/db";
 import { finiteDuration, formatTimeFromSec } from "../lib/audio";
 import { applyLyricTimes, formatStamp, lyricsAreSynced, lyricsFromText, offsetLyricTimes } from "../lib/lyrics";
-import { requestLyricTimes } from "../lib/lyricsSync";
+import { requestLyricTimes, type LyricTemplate } from "../lib/lyricsSync";
 import type { LyricLine } from "../types";
 
 export default function LyricsEditor() {
@@ -48,6 +48,7 @@ export default function LyricsEditor() {
   const [timedFrom, setTimedFrom] = useState("");
   const [loadedId, setLoadedId] = useState("");
   const [delayDraft, setDelayDraft] = useState("0");
+  const [templates, setTemplates] = useState<LyricTemplate[]>([]);
 
   useEffect(() => {
     if (!track || loadedId === track.id) return;
@@ -58,6 +59,7 @@ export default function LyricsEditor() {
     setSaved(false);
     setTimedFrom("");
     setDelayDraft("0");
+    setTemplates([]);
   }, [track, loadedId]);
 
   const timedCount = lines.filter((line) => line.t > 0).length;
@@ -168,6 +170,28 @@ export default function LyricsEditor() {
     shiftAll(delta);
   }
 
+  function applyTemplate(template: LyricTemplate, baseLines?: LyricLine[]) {
+    const next =
+      baseLines ??
+      lyricsFromText(draft).map((line, index) => ({
+        text: line.text,
+        t: lines[index]?.t ?? 0,
+      }));
+    const stamped = applyLyricTimes(next, template.times);
+    const delay = parseDelay();
+    setLines(
+      delay ? offsetLyricTimes(stamped, delay, durationCap || Number.POSITIVE_INFINITY) : stamped
+    );
+    setDraft(next.map((line) => line.text).join("\n"));
+    setTimedFrom(
+      delay
+        ? `${template.source}, then ${delay > 0 ? "+" : ""}${delay.toFixed(2)}s delay`
+        : template.source
+    );
+    setError("");
+    setSaved(false);
+  }
+
   async function autoTime() {
     if (!track) return;
     const next = lyricsFromText(draft).map((line, index) => ({
@@ -190,23 +214,17 @@ export default function LyricsEditor() {
     setError("");
     setSaved(false);
     setTimedFrom("");
+    setTemplates([]);
     try {
       const result = await requestLyricTimes({
         title: track.title,
         durationSec,
         lines: next.map((line) => line.text),
       });
-      const stamped = applyLyricTimes(next, result.times);
-      const delay = parseDelay();
-      setLines(
-        delay ? offsetLyricTimes(stamped, delay, durationCap || Number.POSITIVE_INFINITY) : stamped
-      );
-      setDraft(next.map((line) => line.text).join("\n"));
-      setTimedFrom(
-        delay
-          ? `${result.source}, then ${delay > 0 ? "+" : ""}${delay.toFixed(2)}s delay`
-          : result.source
-      );
+      setTemplates(result.templates);
+      if (result.templates.length === 1) {
+        applyTemplate(result.templates[0], next);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not auto-time those lyrics.");
     } finally {
@@ -269,14 +287,14 @@ export default function LyricsEditor() {
         </div>
       </div>
 
-      <div className="clay p-4 mb-5 flex flex-wrap items-center gap-3" style={{ background: "white" }}>
+      <div className="clay p-3 sm:p-4 mb-5 flex flex-wrap items-center gap-3" style={{ background: "white" }}>
         <button
           type="button"
           onClick={() => {
             if (isActive) togglePlay();
             else play(track, tracks);
           }}
-          className="clay-btn w-12 h-12 flex items-center justify-center"
+          className="clay-btn w-12 h-12 flex items-center justify-center flex-shrink-0"
           style={{ background: "var(--clay-rose)" }}
           aria-label={waiting ? "Loading" : isActive && isPlaying ? "Pause" : "Play"}
         >
@@ -288,8 +306,8 @@ export default function LyricsEditor() {
             <Play size={18} fill="white" className="text-white ml-0.5" />
           )}
         </button>
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-extrabold" style={{ color: "var(--ink)" }}>
+        <div className="min-w-0 flex-1 basis-28">
+          <p className="text-xs font-extrabold tabular-nums" style={{ color: "var(--ink)" }}>
             {isActive ? formatTimeFromSec(currentTime) : "0:00"}
             <span style={{ color: "var(--soft-ink)" }}>
               {" "}
@@ -314,7 +332,7 @@ export default function LyricsEditor() {
         <button
           type="button"
           onClick={stampNext}
-          className="clay-btn px-4 py-3 text-sm font-extrabold"
+          className="clay-btn px-4 py-3 text-sm font-extrabold w-full sm:w-auto min-h-11"
           style={{ background: "var(--clay-mint)", color: "var(--ink)" }}
         >
           Stamp {nextStamp >= 0 ? `line ${nextStamp + 1}` : "done"}
@@ -376,23 +394,89 @@ export default function LyricsEditor() {
         </button>
       </div>
 
-      <div className="clay p-4 mb-6" style={{ background: "white" }}>
+      {templates.length > 0 && (
+        <div className="clay p-3 sm:p-4 mb-6" style={{ background: "white" }}>
+          <p className="text-xs font-extrabold uppercase tracking-wider mb-1" style={{ color: "var(--ink)" }}>
+            Auto-time templates
+          </p>
+          <p className="text-sm font-semibold leading-snug mb-3" style={{ color: "var(--soft-ink)" }}>
+            {templates.length === 1
+              ? "Published karaoke times for this title."
+              : "LRCLIB has more than one synced sheet. Pick the one that matches this upload."}
+          </p>
+          <div className="grid gap-2.5">
+            {templates.map((template, index) => {
+              const closest =
+                templates.length > 1 &&
+                durationCap > 0 &&
+                Math.abs(template.durationSec - durationCap) ===
+                  Math.min(...templates.map((item) => Math.abs((item.durationSec || 0) - durationCap)));
+              return (
+                <button
+                  key={`${template.source}-${index}`}
+                  type="button"
+                  onClick={() => applyTemplate(template)}
+                  className="clay-btn w-full text-left px-3 py-3 sm:px-4 min-h-11"
+                  style={{
+                    background: closest ? "rgba(142,224,200,0.45)" : "var(--cream)",
+                    color: "var(--ink)",
+                  }}
+                >
+                  <span className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                    <span className="min-w-0">
+                      <span className="flex flex-wrap items-center gap-1.5 mb-1">
+                        <span className="text-[11px] font-extrabold uppercase tracking-wider opacity-70">
+                          Template {index + 1}
+                        </span>
+                        {closest && (
+                          <span
+                            className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-full"
+                            style={{ background: "rgba(255,255,255,0.7)" }}
+                          >
+                            Closest length
+                          </span>
+                        )}
+                      </span>
+                      <span className="block text-sm font-extrabold leading-snug break-words [overflow-wrap:anywhere]">
+                        {templateHeadline(template.label)}
+                      </span>
+                      <span className="block text-xs font-semibold mt-1" style={{ color: "var(--soft-ink)" }}>
+                        {template.durationSec > 0 ? formatTimeFromSec(template.durationSec) : "Unknown length"}
+                        {" · "}
+                        {template.matched} timed lines
+                      </span>
+                    </span>
+                    <span
+                      className="text-xs font-extrabold w-full sm:w-auto text-center sm:text-right sm:flex-shrink-0 pt-2 sm:pt-0 border-t sm:border-0"
+                      style={{ borderColor: "rgba(58,47,69,0.08)" }}
+                    >
+                      Use this
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="clay p-3 sm:p-4 mb-6" style={{ background: "white" }}>
         <div className="flex items-start gap-2 mb-2">
           <Clock size={16} className="mt-0.5 flex-shrink-0" style={{ color: "var(--ink)" }} />
-          <div>
+          <div className="min-w-0">
             <p className="text-xs font-extrabold uppercase tracking-wider" style={{ color: "var(--ink)" }}>
               Sync delay
             </p>
-            <p className="text-sm font-semibold leading-relaxed" style={{ color: "var(--soft-ink)" }}>
+            <p className="text-sm font-semibold leading-snug mt-1" style={{ color: "var(--soft-ink)" }}>
               YouTube videos often start later than Spotify. Positive delay waits (intro). Negative brings lyrics in sooner.
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2 mt-3">
+        <div className="grid grid-cols-4 gap-2 mt-3 sm:flex sm:flex-wrap sm:items-center">
           <button
             type="button"
             onClick={() => shiftAll(-1)}
-            className="clay-btn px-3 py-2 text-sm font-extrabold"
+            className="clay-btn min-h-11 px-2 sm:px-3 py-2 text-sm font-extrabold"
             style={{ background: "var(--cream)", color: "var(--ink)" }}
           >
             −1s
@@ -400,16 +484,33 @@ export default function LyricsEditor() {
           <button
             type="button"
             onClick={() => shiftAll(-0.5)}
-            className="clay-btn px-3 py-2 text-sm font-extrabold"
+            className="clay-btn min-h-11 px-2 sm:px-3 py-2 text-sm font-extrabold"
             style={{ background: "var(--cream)", color: "var(--ink)" }}
           >
             −0.5s
           </button>
-          <label className="inline-flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => shiftAll(0.5)}
+            className="clay-btn min-h-11 px-2 sm:px-3 py-2 text-sm font-extrabold"
+            style={{ background: "var(--cream)", color: "var(--ink)" }}
+          >
+            +0.5s
+          </button>
+          <button
+            type="button"
+            onClick={() => shiftAll(1)}
+            className="clay-btn min-h-11 px-2 sm:px-3 py-2 text-sm font-extrabold"
+            style={{ background: "var(--cream)", color: "var(--ink)" }}
+          >
+            +1s
+          </button>
+          <label className="col-span-2 inline-flex items-center gap-1.5 min-w-0 sm:w-auto">
             <span className="sr-only">Delay in seconds</span>
             <input
               type="number"
               step={0.1}
+              inputMode="decimal"
               value={delayDraft}
               onChange={(e) => setDelayDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -418,34 +519,18 @@ export default function LyricsEditor() {
                   applyDelay();
                 }
               }}
-              className="clay w-24 px-3 py-2 text-sm font-extrabold tabular-nums text-center"
+              className="clay w-full sm:w-24 min-h-11 px-3 py-2 text-sm font-extrabold tabular-nums text-center"
               style={{ background: "var(--cream)", color: "var(--ink)", outline: "none" }}
               aria-label="Delay in seconds"
             />
-            <span className="text-xs font-extrabold" style={{ color: "var(--soft-ink)" }}>
+            <span className="text-xs font-extrabold flex-shrink-0" style={{ color: "var(--soft-ink)" }}>
               sec
             </span>
           </label>
           <button
             type="button"
-            onClick={() => shiftAll(0.5)}
-            className="clay-btn px-3 py-2 text-sm font-extrabold"
-            style={{ background: "var(--cream)", color: "var(--ink)" }}
-          >
-            +0.5s
-          </button>
-          <button
-            type="button"
-            onClick={() => shiftAll(1)}
-            className="clay-btn px-3 py-2 text-sm font-extrabold"
-            style={{ background: "var(--cream)", color: "var(--ink)" }}
-          >
-            +1s
-          </button>
-          <button
-            type="button"
             onClick={applyDelay}
-            className="clay-btn px-4 py-2 text-sm font-extrabold"
+            className="clay-btn col-span-2 min-h-11 px-4 py-2 text-sm font-extrabold"
             style={{ background: "var(--clay-mint)", color: "var(--ink)" }}
           >
             Apply delay
@@ -453,11 +538,11 @@ export default function LyricsEditor() {
         </div>
       </div>
 
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between gap-3 mb-3">
         <p className="text-xs font-extrabold uppercase tracking-wider" style={{ color: "var(--soft-ink)" }}>
           Timing · {timedCount}/{lines.length} {synced ? "synced" : "not synced yet"}
         </p>
-        <p className="text-[11px] font-semibold" style={{ color: "var(--soft-ink)" }}>
+        <p className="hidden sm:block text-[11px] font-semibold" style={{ color: "var(--soft-ink)" }}>
           Press T to stamp the next line
         </p>
       </div>
@@ -473,7 +558,7 @@ export default function LyricsEditor() {
             return (
               <div
                 key={`${index}-${line.text}`}
-                className="flex items-center gap-2 px-3 py-2.5"
+                className="flex items-center gap-2 px-3 py-2.5 min-h-12"
                 style={{
                   background: current ? "rgba(142,224,200,0.35)" : index % 2 ? "rgba(244,239,230,0.5)" : "white",
                   borderBottom: "1px solid rgba(58,47,69,0.06)",
@@ -499,7 +584,7 @@ export default function LyricsEditor() {
                 <button
                   type="button"
                   onClick={() => nudge(index, -0.2)}
-                  className="w-8 h-8 rounded-full flex items-center justify-center"
+                  className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0"
                   style={{ background: "var(--cream)" }}
                   aria-label="Earlier"
                 >
@@ -508,7 +593,7 @@ export default function LyricsEditor() {
                 <button
                   type="button"
                   onClick={() => nudge(index, 0.2)}
-                  className="w-8 h-8 rounded-full flex items-center justify-center"
+                  className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0"
                   style={{ background: "var(--cream)" }}
                   aria-label="Later"
                 >
@@ -541,7 +626,7 @@ export default function LyricsEditor() {
           type="button"
           onClick={() => void handleSave()}
           disabled={busy || syncing}
-          className="clay-btn px-5 py-3 text-sm font-extrabold inline-flex items-center gap-2"
+          className="clay-btn px-5 py-3 text-sm font-extrabold inline-flex items-center justify-center gap-2 w-full sm:w-auto min-h-12"
           style={{ background: "var(--clay-rose)", color: "white" }}
         >
           {busy ? <ButtonDots /> : <Save size={16} />}
@@ -549,7 +634,7 @@ export default function LyricsEditor() {
         </button>
         <Link
           to={`/track/${track.id}`}
-          className="clay-btn px-5 py-3 text-sm font-extrabold inline-flex items-center gap-2"
+          className="clay-btn px-5 py-3 text-sm font-extrabold inline-flex items-center justify-center gap-2 w-full sm:w-auto min-h-12"
           style={{ background: "white", color: "var(--ink)" }}
         >
           <Captions size={16} />
@@ -558,6 +643,18 @@ export default function LyricsEditor() {
       </div>
       <StampHotkey onStamp={stampNext} />
     </div>
+  );
+}
+
+function templateHeadline(label: string) {
+  const parts = label
+    .split(" · ")
+    .map((part) => part.trim())
+    .filter((part) => part && !/^\d+:\d{2}$/.test(part));
+  const unique = [...new Set(parts)];
+  return (
+    unique.filter((part) => !unique.some((other) => other !== part && other.includes(part))).join(" · ") ||
+    label
   );
 }
 
