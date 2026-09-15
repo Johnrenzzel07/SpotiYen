@@ -269,12 +269,6 @@ export default function LyricsEditor() {
         </div>
       </div>
 
-      <div className="clay p-4 mb-5" style={{ background: "white" }}>
-        <p className="text-sm font-semibold leading-relaxed" style={{ color: "var(--soft-ink)" }}>
-          Paste one lyric per line. Auto-time looks up a published karaoke/LRC timing sheet for this title and stamps those seconds onto your lines. If this upload is a YouTube video with an intro, add a delay so the stamps wait for the music.
-        </p>
-      </div>
-
       <div className="clay p-4 mb-5 flex flex-wrap items-center gap-3" style={{ background: "white" }}>
         <button
           type="button"
