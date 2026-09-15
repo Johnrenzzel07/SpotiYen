@@ -13,6 +13,7 @@ import CollectionDetail from "./pages/CollectionDetail";
 import Users from "./pages/Users";
 import { CollectionProvider } from "./context/CollectionContext";
 import { LoadingScreen } from "./components/ClaySpinner";
+import ErrorBoundary from "./components/ErrorBoundary";
 import type { ReactNode } from "react";
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
@@ -70,16 +71,18 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <TrackProvider>
-          <CollectionProvider>
-            <PlayerProvider>
-              <AppRoutes />
-            </PlayerProvider>
-          </CollectionProvider>
-        </TrackProvider>
-      </AuthProvider>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AuthProvider>
+          <TrackProvider>
+            <CollectionProvider>
+              <PlayerProvider>
+                <AppRoutes />
+              </PlayerProvider>
+            </CollectionProvider>
+          </TrackProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }

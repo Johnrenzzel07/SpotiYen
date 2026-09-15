@@ -64,45 +64,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     let cancelled = false;
 
-    async function loadFromSession() {
-      const { data } = await supabase.auth.getSession();
-      const sessionUser = data.session?.user;
-      if (!sessionUser) {
-        if (!cancelled) {
-          setUser(null);
-          setLoading(false);
-        }
+    async function applySession(session: { user: { id: string; email?: string; user_metadata?: Record<string, unknown> } } | null) {
+      if (!session?.user) {
+        if (!cancelled) setUser(null);
         return;
       }
       try {
         const profile =
-          (await fetchProfile(sessionUser.id)) ??
-          (await profileFromAuthUser(sessionUser));
+          (await fetchProfile(session.user.id)) ??
+          (await profileFromAuthUser(session.user));
         if (!cancelled) setUser(profile);
       } catch {
-        if (!cancelled) setUser(null);
-      } finally {
-        if (!cancelled) setLoading(false);
+        try {
+          const fallback = await profileFromAuthUser(session.user);
+          if (!cancelled) setUser(fallback);
+        } catch {
+          /* Keep the current screen; a blip should not sign you out. */
+        }
       }
     }
 
-    void loadFromSession();
+    void (async () => {
+      const { data } = await supabase.auth.getSession();
+      await applySession(data.session ?? null);
+      if (!cancelled) setLoading(false);
+    })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session?.user) {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "INITIAL_SESSION") return;
+      if (event === "SIGNED_OUT") {
         setUser(null);
         return;
       }
-      void (async () => {
-        try {
-          const profile =
-            (await fetchProfile(session.user.id)) ??
-            (await profileFromAuthUser(session.user));
-          setUser(profile);
-        } catch {
-          setUser(null);
-        }
-      })();
+      void applySession(session);
     });
 
     return () => {

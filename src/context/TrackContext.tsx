@@ -52,9 +52,13 @@ export function TrackProvider({ children }: { children: ReactNode }) {
   const [newTrackToast, setNewTrackToast] = useState<Track | null>(null);
 
   const refresh = useCallback(async () => {
-    const [all, people] = await Promise.all([getAllTracks(), getAllProfiles()]);
-    setTracks(all);
-    setProfiles(people);
+    try {
+      const [all, people] = await Promise.all([getAllTracks(), getAllProfiles()]);
+      setTracks(all);
+      setProfiles(people);
+    } catch (err) {
+      console.error("Could not load the library", err);
+    }
   }, []);
 
   const ownerName = useCallback(
@@ -78,6 +82,8 @@ export function TrackProvider({ children }: { children: ReactNode }) {
           setTracks(all);
           setProfiles(people);
         }
+      } catch (err) {
+        console.error("Could not load the library", err);
       } finally {
         if (!cancelled) setLoading(false);
       }

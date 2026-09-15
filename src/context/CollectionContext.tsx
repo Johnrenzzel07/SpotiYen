@@ -54,10 +54,8 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
       const msg = err instanceof Error ? err.message : "";
       if (/missing|schema cache|does not exist/i.test(msg)) {
         setMissingTables(true);
-        setCollections([]);
-      } else {
-        throw err;
       }
+      setCollections([]);
     }
   }, []);
 
