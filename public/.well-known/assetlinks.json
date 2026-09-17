@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.vercel.spotiyen.twa",
+      "sha256_cert_fingerprints": [
+        "44:F6:84:D6:5B:A7:AB:14:15:2A:EA:BE:54:68:BB:9D:CD:E3:05:B2:D3:58:0C:09:39:AD:2E:67:C1:1F:F1:FB"
+      ]
+    }
+  }
+]

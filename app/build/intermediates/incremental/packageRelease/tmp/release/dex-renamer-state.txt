@@ -1,0 +1,4 @@
+#Thu Sep 17 10:26:33 SGT 2026
+base.0=C\:\\Users\\John Renzzel\\Desktop\\waragud\\SpotiYen\\app\\build\\intermediates\\dex\\release\\minifyReleaseWithR8\\classes.dex
+renamed.0=classes.dex
+path.0=classes.dex
